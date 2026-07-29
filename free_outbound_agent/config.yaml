@@ -1,0 +1,173 @@
+# ── Who you are ───────────────────────────────────────────────────────────
+company:
+  name: "Acme Inc."
+  description: |
+    One paragraph describing what your product does, who it's for,
+    and the core problem it solves. The LLM uses this to write emails.
+    Be specific — vague descriptions produce vague emails.
+  from_name: "Jane Doe"
+  from_email: "jane@yourdomain.com"
+
+# ── Links included in emails (LLM picks the most relevant 1-2) ────────────
+links:
+  - label: "demo"
+    url: "https://yourproduct.com/demo"
+  - label: "blog post"
+    url: "https://yourproduct.com/blog/how-it-works"
+  - label: "tutorial"
+    url: "https://yourproduct.com/tutorial"
+
+# ── Email generation ───────────────────────────────────────────────────────
+compose:
+  provider: claude          # claude | openai
+  model: claude-opus-4-5    # claude-opus-4-5 | gpt-4o | gpt-4o-mini | etc.
+  tone: |
+    Direct and conversational. No corporate speak. Short sentences.
+    Sound like a smart founder writing personally, not a marketing team.
+  banned_words:
+    - leverage
+    - synergy
+    - delve
+    - robust
+    - seamless
+    - game-changer
+    - revolutionize
+    - cutting-edge
+    - innovative
+    - utilize
+
+# ── Who you want to reach ─────────────────────────────────────────────────
+icp:
+  segments:
+    - name: devrel
+      keywords:
+        - developer advocate
+        - devrel
+        - developer evangelist
+        - developer relations
+    - name: techwriter
+      keywords:
+        - technical writer
+        - tech writer
+    - name: educator
+      keywords:
+        - educator
+        - teacher
+        - instructor
+        - teaching
+    - name: founder
+      keywords:
+        - founder
+        - ceo
+        - co-founder
+        - indie hacker
+        - bootstrapped
+        - solopreneur
+    - name: newsletter
+      keywords:
+        - newsletter
+        - substack
+        - writing about
+
+# ── Where to find leads ───────────────────────────────────────────────────
+sources:
+  github:
+    enabled: true
+    token_env: GITHUB_TOKEN   # name of the env var holding your PAT
+    min_followers: 100
+    queries:
+      - '"developer advocate" in:bio'
+      - '"technical writer" in:bio'
+      - '"newsletter" in:bio'
+      - '"founder" "building" in:bio'
+      - '"indie hacker" in:bio'
+
+  devto:
+    enabled: true
+    tags:
+      - devrel
+      - technicalwriting
+      - newsletter
+      - indiehacker
+      - startup
+    min_reactions: 20
+
+  producthunt:
+    enabled: false            # set to true once you have a PH developer token
+    token_env: PRODUCTHUNT_TOKEN
+    # Topic slugs to search — see producthunt.com/topics for the full list
+    topics:
+      - developer-tools
+      - artificial-intelligence
+      - productivity
+      - marketing
+      - no-code
+      - open-source
+      - developer-tools
+    min_votes: 10             # minimum upvotes for a product to be included
+    pages_per_topic: 5        # pages of 50 posts per topic (more = more leads)
+
+# ── Sequences (optional follow-up steps) ──────────────────────────────────
+# When enabled, `python pipeline.py --follow-up` checks for leads that
+# received a previous step and are due for the next one, then sends.
+# Mark replies manually: python pipeline.py --mark-replied user@example.com
+#
+# The combined daily_limit (below) is shared between new outreach and
+# follow-ups. follow_up_slots reserves a portion of that cap for follow-ups
+# each day — the rest goes to new outreach.
+# Example: daily_limit: 50, follow_up_slots: 15 → up to 35 new + 15 follow-ups/day.
+# If follow_up_slots is not set, follow-ups and new outreach compete for the
+# full daily_limit (follow-ups are sent first as they're higher priority).
+sequences:
+  enabled: false
+  follow_up_slots: 10        # reserve this many daily slots for follow-ups
+  steps:
+    - step: 1
+      delay_days: 0          # initial outreach — sent by --send-only
+    - step: 2
+      delay_days: 3          # first follow-up — fires 3+ days after step 1
+      subject_hint: "new angle worth sharing"
+    - step: 3
+      delay_days: 7          # second follow-up — fires 7+ days after step 2
+      subject_hint: "closing the loop"
+
+# ── How to send ───────────────────────────────────────────────────────────
+send:
+  provider: smtp            # smtp | gmail | zohomail
+  daily_limit: 50
+  delay_seconds: 60
+
+# ── CRM sync (optional) ───────────────────────────────────────────────────
+crm:
+  enabled: false
+  provider: none            # hubspot | zohocrm | none
+
+# ── Lead storage ──────────────────────────────────────────────────────────
+store:
+  leads_file: leads.csv     # all discovered leads
+  sent_file: sent.csv       # tracks sent emails to avoid duplicates
+
+# ── LinkedIn outreach (semi-automated, manual send) ────────────────────────
+# Messages are printed as a copy-paste queue — you send them manually on LinkedIn.
+# LinkedIn recommends <=20 connection requests/day to avoid account restrictions.
+#
+# Run: python linkedin_pipeline.py --queue
+#
+linkedin:
+  enabled: false
+  daily_limit: 20           # max connection requests per day (LinkedIn recommends <=20)
+  note_max_chars: 300       # LinkedIn's hard limit for connection request notes
+
+  store:
+    sent_file: linkedin_sent.csv
+    tracker_file: linkedin_daily_tracker.json
+
+  sequences:
+    enabled: true
+    steps:
+      - step: 1
+        delay_days: 0       # connection request (sent via --queue)
+      - step: 2
+        delay_days: 3       # follow-up DM after connecting (>=3 days after request)
+      - step: 3
+        delay_days: 7       # closing DM (>=7 days after step 2)

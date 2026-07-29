@@ -1,0 +1,11 @@
+.env
+leads.csv
+sent.csv
+*.log
+__pycache__/
+*.pyc
+.DS_Store
+venv/
+**/venv/
+.venv/
+**/.venv/
