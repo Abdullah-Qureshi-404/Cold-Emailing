@@ -1,3 +1,4 @@
+import os
 import time
 import random
 import logging
@@ -12,8 +13,20 @@ from models.lead import Lead, LeadStatus
 from models.email_draft import EmailDraft
 from models.email_log import EmailLog
 from services.gmail_service import send_email, check_thread_for_reply
+from services.unsubscribe_token import make_unsubscribe_token
+from tasks.errors import safe_task_error
 
 logger = logging.getLogger(__name__)
+
+# Public backend URL so unsubscribe links in outbound emails actually resolve
+# for the recipient (not localhost) — set this to your real domain in prod.
+PUBLIC_API_URL = os.getenv("PUBLIC_API_URL", "http://localhost:8000")
+
+
+def _append_unsubscribe_footer(body: str, lead_id: int) -> str:
+    token = make_unsubscribe_token(lead_id)
+    link = f"{PUBLIC_API_URL}/unsubscribe/{token}"
+    return f"{body}\n\n---\nDon't want to hear from us again? Unsubscribe: {link}"
 
 
 @celery_app.task
@@ -60,12 +73,16 @@ def process_email_sending_task(campaign_id: int) -> dict:
             if not lead.email:
                 continue
 
+            if lead.unsubscribed:
+                logger.info("Email sending task: lead %d has unsubscribed, skipping", lead.id)
+                continue
+
             draft = db.query(EmailDraft).filter(EmailDraft.lead_id == lead.id).first()
             if not draft or not draft.subject or not draft.body:
                 continue
 
-            if draft.status == "sent":
-                logger.info("Email sending task: draft for lead %d already sent; skipping", lead.id)
+            if draft.status in ("sent", "rejected"):
+                logger.info("Email sending task: draft for lead %d is %s; skipping", lead.id, draft.status)
                 continue
 
             if lead.status == LeadStatus.EMAIL_GENERATED:
@@ -85,7 +102,7 @@ def process_email_sending_task(campaign_id: int) -> dict:
             result = send_email(
                 to_email=lead.email,
                 subject=draft.subject,
-                body=draft.body
+                body=_append_unsubscribe_footer(draft.body, lead.id)
             )
 
             if result and result.get("gmail_thread_id"):
@@ -135,7 +152,7 @@ def process_email_sending_task(campaign_id: int) -> dict:
         logger.exception("Email sending task fatal error on campaign %d: %s", campaign_id, e)
         return {
             "status": "error",
-            "message": str(e)
+            "message": safe_task_error("Email sending", e)
         }
     finally:
         db.close()
@@ -208,7 +225,7 @@ def process_reply_detection_task(campaign_id: int) -> dict:
         logger.exception("Reply detection task fatal error on campaign %d: %s", campaign_id, e)
         return {
             "status": "error",
-            "message": str(e)
+            "message": safe_task_error("Email sending", e)
         }
     finally:
         db.close()

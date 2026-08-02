@@ -12,6 +12,8 @@ from models.email_draft import EmailDraft
 from models.email_log import EmailLog
 from services.gmail_service import send_email
 from services.groq_service import generate_followup_email
+from tasks.email_sender_tasks import _append_unsubscribe_footer
+from tasks.errors import safe_task_error
 
 logger = logging.getLogger(__name__)
 
@@ -68,7 +70,7 @@ def process_followup_task(campaign_id: int) -> dict:
                 eligible_leads.append((lead, log))
 
         for idx, (lead, log) in enumerate(eligible_leads):
-            if not lead.email:
+            if not lead.email or lead.unsubscribed:
                 continue
 
             draft = db.query(EmailDraft).filter(EmailDraft.lead_id == lead.id).first()
@@ -86,7 +88,7 @@ def process_followup_task(campaign_id: int) -> dict:
             result = send_email(
                 to_email=lead.email,
                 subject=followup_content.get("subject", f"Re: {original_subject}"),
-                body=followup_content.get("body", "")
+                body=_append_unsubscribe_footer(followup_content.get("body", ""), lead.id)
             )
 
             if result and result.get("gmail_thread_id"):
@@ -127,7 +129,7 @@ def process_followup_task(campaign_id: int) -> dict:
         logger.exception("Follow-up task fatal error on campaign %d: %s", campaign_id, e)
         return {
             "status": "error",
-            "message": str(e)
+            "message": safe_task_error("Follow-up", e)
         }
     finally:
         db.close()
@@ -184,7 +186,7 @@ def process_mark_cold_task(campaign_id: int) -> dict:
         logger.exception("Mark cold task fatal error on campaign %d: %s", campaign_id, e)
         return {
             "status": "error",
-            "message": str(e)
+            "message": safe_task_error("Follow-up", e)
         }
     finally:
         db.close()

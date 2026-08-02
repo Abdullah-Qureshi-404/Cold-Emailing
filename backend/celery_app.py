@@ -1,5 +1,10 @@
 import os
 from celery import Celery
+from dotenv import load_dotenv
+
+# Ensure .env is loaded before any os.getenv() calls below, regardless of
+# what order other modules get imported in.
+load_dotenv()
 
 # Get Redis broker URL from environment or fallback to local Redis default
 REDIS_URL = os.getenv("REDIS_URL", "redis://localhost:6379/0")

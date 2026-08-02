@@ -1,13 +1,18 @@
 import subprocess
 import os
+from pathlib import Path
 from lead_sources.normalizer import load_google_maps_csv
+
+# backend/lead_sources/google_maps.py -> backend/lead_sources -> backend -> repo root
+REPO_ROOT = Path(__file__).resolve().parents[2]
+
 
 def scrape_google_maps(query: str, location: str, campaign_id: int) -> list[dict]:
     """
     Runs gosom google-maps-scraper via Docker
     Returns list of normalized leads
     """
-    output_dir = os.path.abspath("../gmaps-output")
+    output_dir = str(REPO_ROOT / "gmaps-output")
     queries_file = os.path.join(output_dir, "queries.txt")
     results_file = os.path.join(output_dir, "results.csv")
 
