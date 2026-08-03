@@ -3,6 +3,7 @@ import { NavLink } from 'react-router-dom'
 import {
   LayoutDashboard,
   Megaphone,
+  Users,
   BarChart3,
   Settings,
   ChevronLeft,
@@ -14,90 +15,116 @@ import { useUIStore } from '../../store/useUIStore'
 import { WorkspaceSwitcher } from './WorkspaceSwitcher'
 import { cn } from '../../lib/utils'
 
-// Per-campaign work (leads, emails, activity) lives inside the Campaign
-// Workspace at /app/campaigns/:id rather than as separate top-level pages.
 const navItems = [
-  { name: 'Command Center', path: '/app/dashboard', icon: LayoutDashboard },
-  { name: 'Campaigns', path: '/app/campaigns', icon: Megaphone },
-  { name: 'Analytics', path: '/app/analytics', icon: BarChart3 },
-  { name: 'Settings', path: '/app/settings', icon: Settings },
+  { name: 'Dashboard', path: '/dashboard', icon: LayoutDashboard },
+  { name: 'Campaigns', path: '/campaigns', icon: Megaphone },
+  { name: 'Leads', path: '/leads', icon: Users },
+  { name: 'Analytics', path: '/analytics', icon: BarChart3 },
+  { name: 'Settings', path: '/settings', icon: Settings },
 ]
 
 export const Sidebar: React.FC = () => {
   const { isSidebarCollapsed, toggleSidebar } = useUIStore()
 
   return (
-    <aside
-      className={cn(
-        'relative flex flex-col border-r border-white/[0.08] bg-[#0c0c0e] transition-all duration-300 ease-in-out select-none',
-        isSidebarCollapsed ? 'w-16' : 'w-60'
-      )}
-    >
-      {/* Sidebar Header & Workspace Switcher */}
-      <div className="flex h-16 items-center px-3 border-b border-white/[0.08]">
-        <WorkspaceSwitcher isCollapsed={isSidebarCollapsed} />
-      </div>
+    <>
+      {/* Desktop Sidebar Navigation */}
+      <aside
+        className={cn(
+          'relative z-20 hidden md:flex flex-col border-r border-white/[0.08] bg-[#12121a]/90 backdrop-blur-2xl transition-all duration-300 ease-in-out select-none',
+          isSidebarCollapsed ? 'w-16' : 'w-60'
+        )}
+      >
+        {/* Sidebar Header & Workspace Switcher */}
+        <div className="flex h-16 items-center px-3 border-b border-white/[0.08]">
+          <WorkspaceSwitcher isCollapsed={isSidebarCollapsed} />
+        </div>
 
-      {/* Navigation Links */}
-      <nav className="flex-1 space-y-1 p-2.5">
+        {/* Navigation Links */}
+        <nav className="flex-1 space-y-1.5 p-3">
+          {!isSidebarCollapsed && (
+            <div className="px-2.5 py-1 text-[10px] font-semibold uppercase tracking-wider text-zinc-500">
+              Outreach Platform
+            </div>
+          )}
+          {navItems.map((item) => {
+            const Icon = item.icon
+            return (
+              <NavLink
+                key={item.name}
+                to={item.path}
+                className={({ isActive }) =>
+                  cn(
+                    'group flex items-center gap-3 rounded-xl px-3 py-2.5 text-xs font-medium transition-all duration-200',
+                    isActive
+                      ? 'bg-violet-600/20 text-violet-200 border border-violet-500/35 shadow-lg shadow-violet-500/10'
+                      : 'text-zinc-400 hover:bg-white/[0.05] hover:text-zinc-100'
+                  )
+                }
+                title={isSidebarCollapsed ? item.name : undefined}
+              >
+                <Icon className="h-4 w-4 shrink-0 text-violet-400 transition-transform duration-200 group-hover:scale-110" />
+                {!isSidebarCollapsed && <span className="truncate font-semibold tracking-tight">{item.name}</span>}
+              </NavLink>
+            )
+          })}
+        </nav>
+
+        {/* System Status Indicators */}
         {!isSidebarCollapsed && (
-          <div className="px-2 py-1 text-[10px] font-semibold uppercase tracking-wider text-zinc-500">
-            Platform
+          <div className="mx-3 mb-3 rounded-xl border border-white/[0.08] bg-[#0a0a0f]/60 backdrop-blur-md p-3 space-y-2">
+            <div className="flex items-center justify-between text-[11px]">
+              <span className="flex items-center gap-1.5 text-zinc-400">
+                <Cpu className="h-3.5 w-3.5 text-violet-400" />
+                Groq AI Latency
+              </span>
+              <span className="font-mono text-violet-300 font-semibold">140ms</span>
+            </div>
+            <div className="flex items-center justify-between text-[11px]">
+              <span className="flex items-center gap-1.5 text-zinc-400">
+                <ShieldCheck className="h-3.5 w-3.5 text-emerald-400" />
+                Warmup Health
+              </span>
+              <span className="font-mono text-emerald-400 font-semibold">99%</span>
+            </div>
           </div>
         )}
+
+        {/* Collapse Toggle Button */}
+        <div className="p-3 border-t border-white/[0.08] flex items-center justify-end">
+          <button
+            onClick={toggleSidebar}
+            className="flex h-8 w-8 items-center justify-center rounded-lg border border-white/[0.08] bg-[#1a1a26] text-zinc-400 transition hover:border-violet-500/30 hover:bg-violet-600/20 hover:text-violet-200"
+            title={isSidebarCollapsed ? 'Expand Sidebar' : 'Collapse Sidebar'}
+          >
+            {isSidebarCollapsed ? <ChevronRight className="h-4 w-4" /> : <ChevronLeft className="h-4 w-4" />}
+          </button>
+        </div>
+      </aside>
+
+      {/* Mobile Bottom Navigation Bar (Screens < 768px) */}
+      <div className="md:hidden fixed bottom-0 left-0 right-0 z-40 flex items-center justify-around border-t border-white/[0.08] bg-[#12121a]/95 px-2 py-2 backdrop-blur-2xl shadow-2xl">
         {navItems.map((item) => {
           const Icon = item.icon
           return (
             <NavLink
-              key={item.path}
+              key={item.name}
               to={item.path}
               className={({ isActive }) =>
                 cn(
-                  'group flex items-center gap-3 rounded-lg px-2.5 py-2 text-xs font-medium transition-all',
+                  'flex flex-col items-center gap-1 rounded-xl px-3 py-1.5 text-[10px] font-semibold transition-all duration-200',
                   isActive
-                    ? 'bg-purple-500/15 text-purple-300 border border-purple-500/25 shadow-sm shadow-purple-500/5'
-                    : 'text-zinc-400 hover:bg-white/[0.04] hover:text-zinc-200'
+                    ? 'text-violet-300 bg-violet-600/20 border border-violet-500/30 shadow-md'
+                    : 'text-zinc-400 hover:text-zinc-200'
                 )
               }
-              title={isSidebarCollapsed ? item.name : undefined}
             >
-              <Icon className="h-4 w-4 shrink-0 transition-colors group-hover:text-purple-400" />
-              {!isSidebarCollapsed && <span className="truncate">{item.name}</span>}
+              <Icon className="h-4 w-4 text-violet-400" />
+              <span>{item.name}</span>
             </NavLink>
           )
         })}
-      </nav>
-
-      {/* System Status Indicators */}
-      {!isSidebarCollapsed && (
-        <div className="mx-2.5 mb-3 rounded-lg border border-white/[0.08] bg-[#111113] p-3 space-y-2">
-          <div className="flex items-center justify-between text-[11px]">
-            <span className="flex items-center gap-1.5 text-zinc-400">
-              <Cpu className="h-3.5 w-3.5 text-purple-400" />
-              Groq AI Latency
-            </span>
-            <span className="font-mono text-purple-300 font-semibold">140ms</span>
-          </div>
-          <div className="flex items-center justify-between text-[11px]">
-            <span className="flex items-center gap-1.5 text-zinc-400">
-              <ShieldCheck className="h-3.5 w-3.5 text-emerald-400" />
-              Warmup Health
-            </span>
-            <span className="font-mono text-emerald-400 font-semibold">99%</span>
-          </div>
-        </div>
-      )}
-
-      {/* Collapse Toggle Button */}
-      <div className="p-2.5 border-t border-white/[0.08] flex items-center justify-end">
-        <button
-          onClick={toggleSidebar}
-          className="flex h-7 w-7 items-center justify-center rounded-md border border-white/[0.08] bg-[#161619] text-zinc-400 transition hover:bg-white/[0.08] hover:text-zinc-200"
-          title={isSidebarCollapsed ? 'Expand Sidebar' : 'Collapse Sidebar'}
-        >
-          {isSidebarCollapsed ? <ChevronRight className="h-4 w-4" /> : <ChevronLeft className="h-4 w-4" />}
-        </button>
       </div>
-    </aside>
+    </>
   )
 }
