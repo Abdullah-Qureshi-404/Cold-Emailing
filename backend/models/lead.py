@@ -1,4 +1,4 @@
-from sqlalchemy import Column, Integer, String, Enum, DateTime, ForeignKey, JSON
+from sqlalchemy import Column, Integer, String, Enum, DateTime, ForeignKey, JSON, Boolean
 from sqlalchemy.sql import func
 from sqlalchemy.orm import relationship
 from database import Base
@@ -88,6 +88,21 @@ class Lead(Base):
     status = Column(
         Enum(LeadStatus),
         default=LeadStatus.FOUND
+    )
+
+    # Human-readable explanation of the qualify/disqualify decision, so the
+    # UI can show *why* without the user having to dig through logs.
+    qualification_reason = Column(
+        String,
+        nullable=True
+    )
+
+    # Email compliance: once true, this lead must never be emailed again —
+    # checked at send time regardless of pipeline stage.
+    unsubscribed = Column(
+        Boolean,
+        default=False,
+        nullable=False
     )
 
     raw_data = Column(

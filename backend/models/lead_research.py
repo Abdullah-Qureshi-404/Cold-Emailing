@@ -56,6 +56,29 @@ class LeadResearch(Base):
         nullable=True
     )
 
+    # Objective "does this lead need our help" signal — low score = outdated
+    # / neglected website, which is the ICP evidence to show in outreach.
+    website_quality_score = Column(
+        Integer,
+        nullable=True
+    )
+
+    website_issues = Column(
+        JSON,
+        nullable=True
+    )
+
+    # ICP-fit signal from the research LLM call: solo / small / medium / large.
+    estimated_team_size = Column(
+        String,
+        nullable=True
+    )
+
+    icp_fit_score = Column(
+        Integer,
+        nullable=True
+    )
+
     created_at = Column(
         DateTime,
         server_default=func.now()

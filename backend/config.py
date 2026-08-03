@@ -13,6 +13,9 @@ GROQ_MAX_RETRY_DELAY = float(os.getenv("GROQ_MAX_RETRY_DELAY", "16.0"))
 
 # Qualification & Approval Thresholds
 MIN_QUALIFICATION_CONFIDENCE = int(os.getenv("MIN_QUALIFICATION_CONFIDENCE", "30"))
+# Below this, research judged the lead a poor fit for a solo/freelance
+# developer's ICP (e.g. looks like a large, well-funded company).
+MIN_ICP_FIT_SCORE = int(os.getenv("MIN_ICP_FIT_SCORE", "40"))
 AUTO_APPROVE_CONFIDENCE_THRESHOLD = int(os.getenv("AUTO_APPROVE_CONFIDENCE_THRESHOLD", "70"))
 
 # Gmail API Settings

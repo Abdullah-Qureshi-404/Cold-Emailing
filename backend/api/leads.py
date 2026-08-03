@@ -1,32 +1,175 @@
-from fastapi import APIRouter, HTTPException, Depends
+from pathlib import Path
+
+from fastapi import APIRouter, HTTPException, Depends, Response
 from sqlalchemy.orm import Session
 from sqlalchemy import func as sql_func
-import os
+from datetime import datetime
 
 from database import get_db
 from models.lead import Lead, LeadStatus
 from models.lead_research import LeadResearch
 from models.email_draft import EmailDraft
-from tasks.lead_tasks import scrape_google_maps_task, import_free_outbound_task
+from models.email_log import EmailLog
+from services.lead_scoring import score_lead
+from services.email_quality import check_email_quality_deterministic
+from services.groq_service import check_email_quality_ai
+from tasks.lead_tasks import scrape_google_maps_task, import_free_outbound_task, scrape_hackernews_task
 from tasks.email_tasks import process_email_discovery_task
 from tasks.research_tasks import process_lead_research_task
 from tasks.qualification_tasks import process_qualification_task, process_email_writing_task
 from tasks.email_sender_tasks import process_email_sending_task, process_reply_detection_task
 from tasks.followup_tasks import process_followup_task, process_mark_cold_task
+from schemas.task import TaskDispatchResponse
+from schemas.lead import (
+    EmailDraftRead,
+    DraftUpdate,
+    DraftUpdateResponse,
+    ResearchStatusRead,
+    ResetCacheResponse,
+    ApproveDraftResponse,
+    LeadListItem,
+    BulkLeadIds,
+)
 
 router = APIRouter()
 
 
-@router.post("/scrape/{campaign_id}")
+def _source_url(lead: Lead) -> str | None:
+    """
+    Link back to the original post/listing/profile a lead was found on —
+    critical when there's no company website (e.g. a Hacker News post),
+    since it's the only way to actually go look at what they said.
+    """
+    raw = lead.raw_data or {}
+    if not isinstance(raw, dict):
+        return None
+    return raw.get("hn_url") or raw.get("link") or raw.get("profile") or None
+
+
+QUALIFIED_OR_LATER = [
+    LeadStatus.QUALIFIED, LeadStatus.EMAIL_GENERATED, LeadStatus.WAITING_APPROVAL,
+    LeadStatus.QUEUED, LeadStatus.SENT, LeadStatus.FOLLOWUP_1, LeadStatus.FOLLOWUP_2,
+    LeadStatus.REPLIED, LeadStatus.COLD,
+]
+DRAFTED_OR_LATER = [
+    LeadStatus.EMAIL_GENERATED, LeadStatus.WAITING_APPROVAL, LeadStatus.QUEUED,
+    LeadStatus.SENT, LeadStatus.FOLLOWUP_1, LeadStatus.FOLLOWUP_2, LeadStatus.REPLIED,
+    LeadStatus.COLD,
+]
+
+
+@router.get("/{campaign_id}/list", response_model=list[LeadListItem])
+def list_leads(
+    campaign_id: int,
+    response: Response,
+    stage: str | None = None,
+    search: str | None = None,
+    source: str | None = None,
+    page: int = 1,
+    page_size: int = 50,
+    db: Session = Depends(get_db)
+):
+    """
+    Raw lead rows for a campaign (newest first). `stage` filters BEFORE the
+    limit is applied (unlike client-side filtering of a fixed-size page),
+    so e.g. "researched" correctly returns leads that were researched
+    earlier and have since moved on to qualification, not just whichever
+    leads happen to be newest.
+
+    stage values: email_found, no_email, researched, qualified,
+    disqualified, drafted, needs_follow_up (no_email + disqualified).
+
+    Paginated via `page`/`page_size`; total matching count (before paging)
+    is returned in the `X-Total-Count` response header.
+    """
+    query = db.query(Lead).filter(Lead.campaign_id == campaign_id)
+
+    if stage == "email_found":
+        query = query.filter(Lead.email.isnot(None))
+    elif stage == "no_email":
+        query = query.filter(Lead.status == LeadStatus.EMAIL_NOT_FOUND)
+    elif stage == "researched":
+        query = query.join(LeadResearch, LeadResearch.lead_id == Lead.id)
+    elif stage == "qualified":
+        query = query.filter(Lead.status.in_(QUALIFIED_OR_LATER))
+    elif stage == "disqualified":
+        query = query.filter(Lead.status == LeadStatus.DISQUALIFIED)
+    elif stage == "drafted":
+        query = query.filter(Lead.status.in_(DRAFTED_OR_LATER))
+    elif stage == "needs_follow_up":
+        query = query.filter(
+            (Lead.status == LeadStatus.EMAIL_NOT_FOUND) | (Lead.status == LeadStatus.DISQUALIFIED)
+        )
+
+    if search:
+        query = query.filter(Lead.company_name.ilike(f"%{search}%"))
+    if source:
+        query = query.filter(Lead.source.ilike(f"%{source}%"))
+
+    total = query.order_by(None).count()
+    response.headers["X-Total-Count"] = str(total)
+
+    page = max(1, page)
+    page_size = max(1, min(page_size, 200))
+    leads = (
+        query.order_by(Lead.created_at.desc())
+        .offset((page - 1) * page_size)
+        .limit(page_size)
+        .all()
+    )
+    items = []
+    for l in leads:
+        lead_score, score_reasons = score_lead(l.research)
+        items.append(LeadListItem(
+            id=l.id,
+            company_name=l.company_name,
+            contact_name=l.contact_name,
+            website=l.website,
+            email=l.email,
+            source=l.source,
+            source_url=_source_url(l),
+            status=l.status.value if hasattr(l.status, "value") else str(l.status),
+            website_issues=l.research.website_issues if l.research else None,
+            icp_fit_score=l.research.icp_fit_score if l.research else None,
+            company_summary=l.research.company_summary if l.research else None,
+            qualification_reason=l.qualification_reason,
+            lead_score=lead_score if l.research else None,
+            score_reasons=score_reasons if l.research else None,
+        ))
+    return items
+
+# backend/api/leads.py -> backend/api -> backend -> repo root
+REPO_ROOT = Path(__file__).resolve().parents[2]
+DEFAULT_FREE_OUTBOUND_CSV = REPO_ROOT / "free_outbound_agent" / "leads.csv"
+
+
+@router.post("/scrape/{campaign_id}", response_model=TaskDispatchResponse)
 def scrape_leads(
     campaign_id: int,
     query: str = "software company",
-    location: str = "New York"
+    location: str = "New York",
+    db: Session = Depends(get_db)
 ):
     """
     Triggers Google Maps scraping as an asynchronous background Celery task.
-    Returns immediately with task details.
+    Skips task queue if leads have already been imported today for this campaign.
     """
+    start_of_today = datetime.now().replace(hour=0, minute=0, second=0, microsecond=0)
+    existing_today_count = db.query(Lead).filter(
+        Lead.campaign_id == campaign_id,
+        Lead.source == "google_maps",
+        Lead.created_at >= start_of_today
+    ).count()
+
+    if existing_today_count > 0:
+        return {
+            "status": "skipped",
+            "message": "Leads already scraped today.",
+            "total_saved": existing_today_count,
+            "task_id": None,
+            "campaign_id": campaign_id
+        }
+
     # Dispatch scraping job to Celery task queue
     task = scrape_google_maps_task.delay(
         query=query,
@@ -42,23 +185,40 @@ def scrape_leads(
     }
 
 
-@router.post("/import-free-outbound/{campaign_id}")
+@router.post("/import-free-outbound/{campaign_id}", response_model=TaskDispatchResponse)
 def import_free_outbound_csv(
     campaign_id: int,
-    file_path: str = None
+    file_path: str = None,
+    db: Session = Depends(get_db)
 ):
     """
     Triggers Free Outbound Agent CSV lead import as an asynchronous background Celery task.
-    Returns immediately with task details.
+    Skips task queue if leads have already been imported today for this campaign.
     """
-    target_path = file_path or os.path.abspath("../free_outbound_agent/leads.csv")
+    start_of_today = datetime.now().replace(hour=0, minute=0, second=0, microsecond=0)
+    existing_today_count = db.query(Lead).filter(
+        Lead.campaign_id == campaign_id,
+        Lead.source.like("free_outbound%"),
+        Lead.created_at >= start_of_today
+    ).count()
 
-    if not os.path.exists(target_path):
+    if existing_today_count > 0:
+        return {
+            "status": "skipped",
+            "message": "Leads already scraped today.",
+            "total_saved": existing_today_count,
+            "task_id": None,
+            "campaign_id": campaign_id
+        }
+
+    target_path = Path(file_path).resolve() if file_path else DEFAULT_FREE_OUTBOUND_CSV
+
+    if not target_path.exists():
         raise HTTPException(status_code=404, detail=f"CSV file not found at {target_path}")
 
     # Dispatch import job to Celery task queue
     task = import_free_outbound_task.delay(
-        file_path=target_path,
+        file_path=str(target_path),
         campaign_id=campaign_id
     )
 
@@ -70,7 +230,76 @@ def import_free_outbound_csv(
     }
 
 
-@router.post("/find-emails/{campaign_id}")
+@router.post("/scrape-hackernews/{campaign_id}", response_model=TaskDispatchResponse)
+def scrape_hackernews_leads(
+    campaign_id: int,
+    query: str = "",
+    db: Session = Depends(get_db)
+):
+    """
+    Triggers a Hacker News intent-based lead search (people publicly asking
+    for developer/freelance help) as a background Celery task.
+    """
+    start_of_today = datetime.now().replace(hour=0, minute=0, second=0, microsecond=0)
+    existing_today_count = db.query(Lead).filter(
+        Lead.campaign_id == campaign_id,
+        Lead.source == "hackernews",
+        Lead.created_at >= start_of_today
+    ).count()
+
+    if existing_today_count > 0:
+        return {
+            "status": "skipped",
+            "message": "Hacker News already scraped today.",
+            "total_saved": existing_today_count,
+            "task_id": None,
+            "campaign_id": campaign_id
+        }
+
+    task = scrape_hackernews_task.delay(query=query, campaign_id=campaign_id)
+
+    return {
+        "message": "Hacker News scraping background task initiated",
+        "task_id": task.id,
+        "campaign_id": campaign_id,
+        "status": "queued"
+    }
+
+
+@router.delete("/reset-daily-cache/{campaign_id}", response_model=ResetCacheResponse)
+def reset_daily_cache(
+    campaign_id: int,
+    db: Session = Depends(get_db)
+):
+    """
+    Deletes only today's imported leads for a campaign and returns count of removed leads.
+    """
+    start_of_today = datetime.now().replace(hour=0, minute=0, second=0, microsecond=0)
+
+    today_leads = db.query(Lead).filter(
+        Lead.campaign_id == campaign_id,
+        Lead.created_at >= start_of_today
+    ).all()
+
+    lead_ids = [lead.id for lead in today_leads]
+
+    if lead_ids:
+        db.query(EmailLog).filter(EmailLog.lead_id.in_(lead_ids)).delete(synchronize_session=False)
+        db.query(EmailDraft).filter(EmailDraft.lead_id.in_(lead_ids)).delete(synchronize_session=False)
+        db.query(LeadResearch).filter(LeadResearch.lead_id.in_(lead_ids)).delete(synchronize_session=False)
+        deleted_count = db.query(Lead).filter(Lead.id.in_(lead_ids)).delete(synchronize_session=False)
+        db.commit()
+    else:
+        deleted_count = 0
+
+    return {
+        "deleted": deleted_count,
+        "message": "Today's cached leads removed."
+    }
+
+
+
+@router.post("/find-emails/{campaign_id}", response_model=TaskDispatchResponse)
 def find_emails_for_campaign(
     campaign_id: int
 ):
@@ -88,7 +317,7 @@ def find_emails_for_campaign(
     }
 
 
-@router.post("/research/{campaign_id}")
+@router.post("/research/{campaign_id}", response_model=TaskDispatchResponse)
 def research_leads_for_campaign(
     campaign_id: int
 ):
@@ -108,7 +337,7 @@ def research_leads_for_campaign(
     }
 
 
-@router.get("/{campaign_id}/research-status")
+@router.get("/{campaign_id}/research-status", response_model=ResearchStatusRead)
 def get_research_status(
     campaign_id: int,
     db: Session = Depends(get_db)
@@ -153,7 +382,7 @@ def get_research_status(
     }
 
 
-@router.post("/qualify/{campaign_id}")
+@router.post("/qualify/{campaign_id}", response_model=TaskDispatchResponse)
 def qualify_leads_for_campaign(
     campaign_id: int
 ):
@@ -171,7 +400,7 @@ def qualify_leads_for_campaign(
     }
 
 
-@router.post("/write-emails/{campaign_id}")
+@router.post("/write-emails/{campaign_id}", response_model=TaskDispatchResponse)
 def write_emails_for_campaign(
     campaign_id: int
 ):
@@ -189,7 +418,7 @@ def write_emails_for_campaign(
     }
 
 
-@router.get("/{campaign_id}/email-drafts")
+@router.get("/{campaign_id}/email-drafts", response_model=list[EmailDraftRead])
 def get_email_drafts(
     campaign_id: int,
     db: Session = Depends(get_db)
@@ -199,21 +428,85 @@ def get_email_drafts(
     """
     drafts = db.query(EmailDraft).join(Lead).filter(
         Lead.campaign_id == campaign_id
-    ).all()
+    ).order_by(EmailDraft.created_at.desc()).all()
 
-    return [
-        {
+    result = []
+    for draft in drafts:
+        research = draft.lead.research
+        pain_points = None
+        if research and research.pain_points and isinstance(research.pain_points, dict):
+            pain_points = research.pain_points.get("possible_pain_points")
+        lead_score, score_reasons = score_lead(research)
+        result.append({
             "lead_id": draft.lead_id,
             "company_name": draft.lead.company_name,
+            "website": draft.lead.website,
             "subject": draft.subject,
             "body": draft.body,
-            "status": draft.status
-        }
-        for draft in drafts
-    ]
+            "status": draft.status,
+            "company_summary": research.company_summary if research else None,
+            "pain_points": pain_points,
+            "website_issues": research.website_issues if research else None,
+            "icp_fit_score": research.icp_fit_score if research else None,
+            "lead_score": lead_score if research else None,
+            "score_reasons": score_reasons if research else None,
+        })
+    return result
 
 
-@router.post("/send-emails/{campaign_id}")
+@router.patch("/draft/{lead_id}", response_model=DraftUpdateResponse)
+def update_email_draft(
+    lead_id: int,
+    data: DraftUpdate,
+    db: Session = Depends(get_db)
+):
+    """
+    Persists user edits to a draft's subject/body. Separate from approval:
+    editing does not change the draft's approval status.
+    """
+    draft = db.query(EmailDraft).filter(EmailDraft.lead_id == lead_id).first()
+
+    if not draft:
+        raise HTTPException(status_code=404, detail="Email draft not found for lead")
+
+    draft.subject = data.subject
+    draft.body = data.body
+    db.commit()
+    db.refresh(draft)
+
+    return {
+        "message": "Email draft updated successfully",
+        "lead_id": lead_id,
+        "draft_id": draft.id,
+        "subject": draft.subject,
+        "body": draft.body
+    }
+
+
+@router.post("/draft/{lead_id}/check-quality")
+def check_draft_quality(lead_id: int, ai_review: bool = False, db: Session = Depends(get_db)):
+    """
+    Runs free, deterministic quality checks (spam words, length, greeting,
+    CTA, personalization heuristic) on demand. Pass ?ai_review=true to also
+    run a deeper Groq-backed review — that part costs a real LLM call, so
+    it's opt-in per click, never automatic.
+    """
+    draft = db.query(EmailDraft).filter(EmailDraft.lead_id == lead_id).first()
+    if not draft:
+        raise HTTPException(status_code=404, detail="Email draft not found for lead")
+
+    result = check_email_quality_deterministic(draft.subject or "", draft.body or "")
+    result["ai_review"] = None
+
+    if ai_review:
+        ai_result = check_email_quality_ai(draft.subject or "", draft.body or "")
+        if ai_result:
+            result["ai_review"] = ai_result
+
+    return result
+
+
+@router.post("/send-emails/{campaign_id}", response_model=TaskDispatchResponse)
 def send_emails_for_campaign(
     campaign_id: int
 ):
@@ -230,7 +523,7 @@ def send_emails_for_campaign(
     }
 
 
-@router.post("/check-replies/{campaign_id}")
+@router.post("/check-replies/{campaign_id}", response_model=TaskDispatchResponse)
 def check_replies_for_campaign(
     campaign_id: int
 ):
@@ -247,7 +540,7 @@ def check_replies_for_campaign(
     }
 
 
-@router.patch("/approve-email/{lead_id}")
+@router.patch("/approve-email/{lead_id}", response_model=ApproveDraftResponse)
 def approve_email_draft(
     lead_id: int,
     db: Session = Depends(get_db)
@@ -283,7 +576,38 @@ def approve_email_draft(
 
 
 
-@router.post("/send-followups/{campaign_id}")
+@router.patch("/bulk-approve")
+def bulk_approve_drafts(payload: BulkLeadIds, db: Session = Depends(get_db)):
+    """Approves multiple drafts in one call instead of one request per lead."""
+    approved = 0
+    for lead_id in payload.lead_ids:
+        draft = db.query(EmailDraft).filter(EmailDraft.lead_id == lead_id).first()
+        if not draft:
+            continue
+        draft.status = "approved"
+        lead = db.query(Lead).filter(Lead.id == lead_id).first()
+        if lead and lead.status == LeadStatus.WAITING_APPROVAL:
+            lead.status = LeadStatus.EMAIL_GENERATED
+        approved += 1
+    db.commit()
+    return {"message": f"{approved} draft(s) approved", "approved": approved}
+
+
+@router.patch("/bulk-reject")
+def bulk_reject_drafts(payload: BulkLeadIds, db: Session = Depends(get_db)):
+    """Rejects multiple drafts — they're excluded from sending, not deleted."""
+    rejected = 0
+    for lead_id in payload.lead_ids:
+        draft = db.query(EmailDraft).filter(EmailDraft.lead_id == lead_id).first()
+        if not draft:
+            continue
+        draft.status = "rejected"
+        rejected += 1
+    db.commit()
+    return {"message": f"{rejected} draft(s) rejected", "rejected": rejected}
+
+
+@router.post("/send-followups/{campaign_id}", response_model=TaskDispatchResponse)
 def send_followups_for_campaign(
     campaign_id: int
 ):
@@ -300,7 +624,7 @@ def send_followups_for_campaign(
     }
 
 
-@router.post("/mark-cold/{campaign_id}")
+@router.post("/mark-cold/{campaign_id}", response_model=TaskDispatchResponse)
 def mark_cold_for_campaign(
     campaign_id: int
 ):

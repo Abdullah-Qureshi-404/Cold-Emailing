@@ -5,6 +5,7 @@ from models.lead import Lead, LeadStatus
 from models.lead_research import LeadResearch
 from services.company_scraper import extract_company_information
 from services.groq_service import generate_company_research
+from services.website_quality import assess_website_quality
 
 logger = logging.getLogger(__name__)
 
@@ -64,6 +65,16 @@ def research_lead(lead: Lead, db: Session) -> bool:
         "possible_pain_points": research_data.get("possible_pain_points", []),
         "personalization_angles": research_data.get("personalization_angles", [])
     }
+    estimated_team_size = research_data.get("estimated_team_size")
+    icp_fit_score = research_data.get("icp_fit_score")
+    if isinstance(icp_fit_score, str) and icp_fit_score.isdigit():
+        icp_fit_score = int(icp_fit_score)
+    if not isinstance(icp_fit_score, int):
+        icp_fit_score = None
+
+    # "Does this lead actually need our help" evidence — an outdated/broken
+    # website is the strongest possible signal for a web/dev freelancer.
+    website_quality_score, website_issues = assess_website_quality(lead.website)
 
     # Step 5: Validate research quality
     has_summary = bool(company_summary and company_summary.strip())
@@ -118,6 +129,10 @@ def research_lead(lead: Lead, db: Session) -> bool:
         existing_research.research_status = research_status
         existing_research.confidence_score = confidence_score
         existing_research.sources_used = sources_used
+        existing_research.website_quality_score = website_quality_score
+        existing_research.website_issues = website_issues
+        existing_research.estimated_team_size = estimated_team_size
+        existing_research.icp_fit_score = icp_fit_score
     else:
         new_research = LeadResearch(
             lead_id=lead.id,
@@ -127,7 +142,11 @@ def research_lead(lead: Lead, db: Session) -> bool:
             pain_points=pain_points_data,
             research_status=research_status,
             confidence_score=confidence_score,
-            sources_used=sources_used
+            sources_used=sources_used,
+            website_quality_score=website_quality_score,
+            website_issues=website_issues,
+            estimated_team_size=estimated_team_size,
+            icp_fit_score=icp_fit_score
         )
         db.add(new_research)
 

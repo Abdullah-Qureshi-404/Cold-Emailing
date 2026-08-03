@@ -4,6 +4,7 @@ from database import SessionLocal
 from models.lead import Lead, LeadStatus
 from services.email_finder import find_email_from_website
 from services.email_verifier import verify_email_domain
+from tasks.errors import safe_task_error
 
 logger = logging.getLogger(__name__)
 
@@ -66,6 +67,9 @@ def process_email_discovery_task(campaign_id: int) -> dict:
             "emails_found": found_count
         }
         logger.info("Email discovery task finished for campaign %d: %s", campaign_id, summary)
+        if found_count > 0:
+            from tasks.research_tasks import process_lead_research_task
+            process_lead_research_task.delay(campaign_id=campaign_id)
         return summary
 
     except Exception as e:
@@ -73,7 +77,7 @@ def process_email_discovery_task(campaign_id: int) -> dict:
         logger.exception("Email discovery task error for campaign %d: %s", campaign_id, e)
         return {
             "status": "error",
-            "message": str(e)
+            "message": safe_task_error("Email discovery", e)
         }
     finally:
         db.close()

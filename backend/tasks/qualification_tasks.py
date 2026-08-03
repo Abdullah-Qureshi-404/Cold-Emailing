@@ -1,11 +1,33 @@
 import logging
+import time
+from concurrent.futures import ThreadPoolExecutor, as_completed
 from celery_app import celery_app
 from database import SessionLocal
 from models.lead import Lead, LeadStatus
 from agents.qualification_agent import qualify_lead
 from agents.email_writer_agent import write_email_for_lead
+from tasks.errors import safe_task_error
 
 logger = logging.getLogger(__name__)
+
+# Email writing calls Groq per lead — same I/O-bound bottleneck as research,
+# same fix: process leads concurrently instead of one at a time.
+EMAIL_WRITING_CONCURRENCY = 5
+
+
+def _write_one(lead_id: int) -> tuple[bool, str | None]:
+    db = SessionLocal()
+    try:
+        lead = db.query(Lead).filter(Lead.id == lead_id).first()
+        if not lead:
+            return False, "lead_not_found"
+        return write_email_for_lead(lead, db)
+    except Exception as e:
+        db.rollback()
+        logger.error("Email writing task: exception on lead %d: %s", lead_id, e)
+        return False, str(e)
+    finally:
+        db.close()
 
 
 @celery_app.task
@@ -63,6 +85,8 @@ def process_qualification_task(campaign_id: int) -> dict:
             "failed": failed_count
         }
         logger.info("Qualification task finished for campaign %d: %s", campaign_id, summary)
+        if qualified_count > 0:
+            process_email_writing_task.delay(campaign_id=campaign_id)
         return summary
 
     except Exception as e:
@@ -70,14 +94,14 @@ def process_qualification_task(campaign_id: int) -> dict:
         logger.exception("Qualification task fatal error on campaign %d: %s", campaign_id, e)
         return {
             "status": "error",
-            "message": str(e)
+            "message": safe_task_error("Qualification/email writing", e)
         }
     finally:
         db.close()
 
 
-@celery_app.task
-def process_email_writing_task(campaign_id: int) -> dict:
+@celery_app.task(bind=True)
+def process_email_writing_task(self, campaign_id: int) -> dict:
     """
     Background Celery task that finds all QUALIFIED leads for a campaign
     and generates personalized cold email drafts for each one individually.
@@ -88,6 +112,7 @@ def process_email_writing_task(campaign_id: int) -> dict:
     successful_count = 0
     failed_count = 0
     skipped_count = 0
+    started_at = time.time()
 
     try:
         leads = db.query(Lead).filter(
@@ -106,12 +131,15 @@ def process_email_writing_task(campaign_id: int) -> dict:
                 "skipped": 0
             }
 
-        logger.info("Email writing task: processing %d QUALIFIED leads for campaign %d", len(leads), campaign_id)
+        lead_ids = [l.id for l in leads]
+        logger.info("Email writing task: processing %d QUALIFIED leads for campaign %d (concurrency=%d)", len(lead_ids), campaign_id, EMAIL_WRITING_CONCURRENCY)
 
-        for lead in leads:
-            processed_count += 1
-            try:
-                success, reason = write_email_for_lead(lead, db)
+        total = len(lead_ids)
+        with ThreadPoolExecutor(max_workers=EMAIL_WRITING_CONCURRENCY) as pool:
+            futures = {pool.submit(_write_one, lid): lid for lid in lead_ids}
+            for future in as_completed(futures):
+                processed_count += 1
+                success, reason = future.result()
                 if success:
                     if reason == "already_sent":
                         skipped_count += 1
@@ -119,12 +147,16 @@ def process_email_writing_task(campaign_id: int) -> dict:
                         successful_count += 1
                 else:
                     failed_count += 1
-                    logger.warning("Email writing task: draft generation unsuccessful for lead %d (reason: %s)", lead.id, reason)
-            except Exception as e:
-                db.rollback()
-                failed_count += 1
-                logger.error("Email writing task: error processing lead %d (%s): %s", lead.id, lead.company_name, e)
-                continue
+                    logger.warning("Email writing task: draft generation unsuccessful for lead %d (reason: %s)", futures[future], reason)
+
+                elapsed = time.time() - started_at
+                rate = processed_count / elapsed if elapsed > 0 else 0
+                remaining = total - processed_count
+                eta_seconds = int(remaining / rate) if rate > 0 else None
+                self.update_state(
+                    state="PROGRESS",
+                    meta={"current": processed_count, "total": total, "eta_seconds": eta_seconds},
+                )
 
         summary = {
             "status": "success",
@@ -142,7 +174,7 @@ def process_email_writing_task(campaign_id: int) -> dict:
         logger.exception("Email writing task fatal error on campaign %d: %s", campaign_id, e)
         return {
             "status": "error",
-            "message": str(e)
+            "message": safe_task_error("Qualification/email writing", e)
         }
     finally:
         db.close()

@@ -1,11 +1,34 @@
 from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy.orm import Session
+from sqlalchemy import func as sql_func
 from database import get_db
 from models.campaign import Campaign, CampaignStatus
 from models.lead import Lead, LeadStatus
+from models.email_draft import EmailDraft
+from models.email_log import EmailLog
+from models.lead_research import LeadResearch
 from pydantic import BaseModel
+from schemas.campaign import (
+    CampaignRead, CampaignActionResponse, DashboardMetrics, LeadsSummary,
+    PipelineProgress, CampaignPlanRequest, CampaignPlan,
+)
+from services.groq_service import generate_campaign_plan
 
 router = APIRouter()
+
+
+@router.post("/plan", response_model=CampaignPlan)
+def plan_campaign(payload: CampaignPlanRequest):
+    """
+    Turns a one-line description ("Find dentists in Texas with fewer than
+    20 employees") into a structured campaign plan. Returns a SUGGESTION
+    only — does not create a campaign. The user reviews/edits the result
+    and still submits it through the normal POST / below.
+    """
+    plan = generate_campaign_plan(payload.prompt)
+    if not plan:
+        raise HTTPException(status_code=502, detail="Couldn't generate a plan from that description. Try rephrasing or being more specific.")
+    return plan
 
 
 class CampaignCreate(BaseModel):
@@ -17,7 +40,7 @@ class CampaignCreate(BaseModel):
     daily_limit: int = 50
 
 
-@router.post("/")
+@router.post("/", response_model=CampaignRead)
 def create_campaign(data: CampaignCreate, db: Session = Depends(get_db)):
     campaign = Campaign(
         user_id="temp_user",  # Will be replaced with Clerk user ID later
@@ -31,15 +54,16 @@ def create_campaign(data: CampaignCreate, db: Session = Depends(get_db)):
     db.add(campaign)
     db.commit()
     db.refresh(campaign)
-    return campaign
+    return CampaignRead.from_orm_campaign(campaign)
 
 
-@router.get("/")
+@router.get("/", response_model=list[CampaignRead])
 def get_campaigns(db: Session = Depends(get_db)):
-    return db.query(Campaign).all()
+    campaigns = db.query(Campaign).all()
+    return [CampaignRead.from_orm_campaign(c) for c in campaigns]
 
 
-@router.patch("/{id}/start")
+@router.patch("/{id}/start", response_model=CampaignActionResponse)
 def start_campaign(id: int, db: Session = Depends(get_db)):
     campaign = db.query(Campaign).filter(Campaign.id == id).first()
     if not campaign:
@@ -49,7 +73,7 @@ def start_campaign(id: int, db: Session = Depends(get_db)):
     return {"message": "Campaign started"}
 
 
-@router.patch("/{id}/pause")
+@router.patch("/{id}/pause", response_model=CampaignActionResponse)
 def pause_campaign(id: int, db: Session = Depends(get_db)):
     campaign = db.query(Campaign).filter(Campaign.id == id).first()
     if not campaign:
@@ -59,7 +83,7 @@ def pause_campaign(id: int, db: Session = Depends(get_db)):
     return {"message": "Campaign paused"}
 
 
-@router.patch("/{id}/stop")
+@router.patch("/{id}/stop", response_model=CampaignActionResponse)
 def stop_campaign(id: int, db: Session = Depends(get_db)):
     campaign = db.query(Campaign).filter(Campaign.id == id).first()
     if not campaign:
@@ -69,7 +93,7 @@ def stop_campaign(id: int, db: Session = Depends(get_db)):
     return {"message": "Campaign stopped"}
 
 
-@router.get("/{campaign_id}/dashboard")
+@router.get("/{campaign_id}/dashboard", response_model=DashboardMetrics)
 def get_campaign_dashboard(campaign_id: int, db: Session = Depends(get_db)):
     """
     Returns high-level dashboard metrics for a campaign.
@@ -80,17 +104,18 @@ def get_campaign_dashboard(campaign_id: int, db: Session = Depends(get_db)):
 
     total_leads = db.query(Lead).filter(Lead.campaign_id == campaign_id).count()
 
-    sent_statuses = [
-        LeadStatus.SENT,
-        LeadStatus.FOLLOWUP_1,
-        LeadStatus.FOLLOWUP_2,
-        LeadStatus.REPLIED,
-        LeadStatus.COLD
-    ]
-    emails_sent = db.query(Lead).filter(
-        Lead.campaign_id == campaign_id,
-        Lead.status.in_(sent_statuses)
-    ).count()
+    # Derive emails_sent / followups_sent from actual EmailLog send events rather
+    # than current lead status, so a lead moving on to REPLIED/COLD after a
+    # followup doesn't make either counter shrink or double-count the other.
+    sent_log_counts = (
+        db.query(EmailLog.lead_id, sql_func.count(EmailLog.id).label("sent_count"))
+        .join(Lead, EmailLog.lead_id == Lead.id)
+        .filter(Lead.campaign_id == campaign_id, EmailLog.status == "sent")
+        .group_by(EmailLog.lead_id)
+        .all()
+    )
+    emails_sent = len(sent_log_counts)
+    followups_sent = sum(1 for _, sent_count in sent_log_counts if sent_count > 1)
 
     replies = db.query(Lead).filter(
         Lead.campaign_id == campaign_id,
@@ -109,20 +134,20 @@ def get_campaign_dashboard(campaign_id: int, db: Session = Depends(get_db)):
         Lead.status == LeadStatus.DISQUALIFIED
     ).count()
 
-    followups_sent = db.query(Lead).filter(
-        Lead.campaign_id == campaign_id,
-        Lead.status.in_([LeadStatus.FOLLOWUP_1, LeadStatus.FOLLOWUP_2])
-    ).count()
-
     cold_leads = db.query(Lead).filter(
         Lead.campaign_id == campaign_id,
         Lead.status == LeadStatus.COLD
     ).count()
 
-    emails_generated = db.query(Lead).filter(
-        Lead.campaign_id == campaign_id,
-        Lead.status == LeadStatus.EMAIL_GENERATED
-    ).count()
+    # Cumulative count of drafts ever generated for this campaign — unlike a
+    # snapshot of leads currently sitting in EMAIL_GENERATED, this doesn't
+    # decrease as leads progress to SENT.
+    emails_generated = (
+        db.query(EmailDraft)
+        .join(Lead, EmailDraft.lead_id == Lead.id)
+        .filter(Lead.campaign_id == campaign_id)
+        .count()
+    )
 
     waiting_approval = db.query(Lead).filter(
         Lead.campaign_id == campaign_id,
@@ -153,7 +178,59 @@ def get_campaign_dashboard(campaign_id: int, db: Session = Depends(get_db)):
 
 
 
-@router.get("/{campaign_id}/leads-summary")
+@router.get("/{campaign_id}/pipeline-progress", response_model=PipelineProgress)
+def get_pipeline_progress(campaign_id: int, db: Session = Depends(get_db)):
+    """
+    Cumulative per-stage counts for the "Process Leads" UI — deliberately
+    NOT based on current lead status, since a lead leaves e.g.
+    RESEARCH_COMPLETE the moment it's qualified, which would otherwise make
+    the "Research done" counter shrink back toward 0 as qualification runs.
+    """
+    campaign = db.query(Campaign).filter(Campaign.id == campaign_id).first()
+    if not campaign:
+        raise HTTPException(status_code=404, detail="Campaign not found")
+
+    leads_found = db.query(Lead).filter(Lead.campaign_id == campaign_id).count()
+
+    emails_found = db.query(Lead).filter(
+        Lead.campaign_id == campaign_id,
+        Lead.email.isnot(None)
+    ).count()
+
+    research_done = (
+        db.query(LeadResearch)
+        .join(Lead, LeadResearch.lead_id == Lead.id)
+        .filter(Lead.campaign_id == campaign_id)
+        .count()
+    )
+
+    qualified_or_later = [
+        LeadStatus.QUALIFIED, LeadStatus.EMAIL_GENERATED, LeadStatus.WAITING_APPROVAL,
+        LeadStatus.QUEUED, LeadStatus.SENT, LeadStatus.FOLLOWUP_1, LeadStatus.FOLLOWUP_2,
+        LeadStatus.REPLIED, LeadStatus.COLD,
+    ]
+    qualified_done = db.query(Lead).filter(
+        Lead.campaign_id == campaign_id,
+        Lead.status.in_(qualified_or_later)
+    ).count()
+
+    emails_written = (
+        db.query(EmailDraft)
+        .join(Lead, EmailDraft.lead_id == Lead.id)
+        .filter(Lead.campaign_id == campaign_id)
+        .count()
+    )
+
+    return PipelineProgress(
+        leads_found=leads_found,
+        emails_found=emails_found,
+        research_done=research_done,
+        qualified_done=qualified_done,
+        emails_written=emails_written,
+    )
+
+
+@router.get("/{campaign_id}/leads-summary", response_model=LeadsSummary)
 def get_campaign_leads_summary(campaign_id: int, db: Session = Depends(get_db)):
     """
     Returns breakdown of leads by status for a campaign.
@@ -190,3 +267,55 @@ def get_campaign_leads_summary(campaign_id: int, db: Session = Depends(get_db)):
             summary[status_key] += 1
 
     return summary
+
+
+@router.post("/{campaign_id}/resume-pipeline")
+def resume_pipeline(campaign_id: int, db: Session = Depends(get_db)):
+    """
+    If a campaign's pipeline stalled partway through (worker restart, a task
+    died before dispatching the next stage, etc.), this inspects which
+    stages currently have eligible leads and re-dispatches all of them —
+    each stage only touches its own status bucket, so running several at
+    once is safe, and the existing auto-chain (see tasks/*.py) cascades
+    onward from there instead of requiring a full restart from scratch.
+    """
+    from tasks.email_tasks import process_email_discovery_task
+    from tasks.research_tasks import process_lead_research_task
+    from tasks.qualification_tasks import process_qualification_task, process_email_writing_task
+
+    campaign = db.query(Campaign).filter(Campaign.id == campaign_id).first()
+    if not campaign:
+        raise HTTPException(status_code=404, detail="Campaign not found")
+
+    counts = {
+        "find_emails": db.query(Lead).filter(Lead.campaign_id == campaign_id, Lead.status == LeadStatus.FOUND).count(),
+        "research": db.query(Lead).filter(
+            Lead.campaign_id == campaign_id,
+            Lead.status.in_([LeadStatus.EMAIL_FOUND, LeadStatus.RESEARCH_PENDING])
+        ).count(),
+        "qualify": db.query(Lead).filter(Lead.campaign_id == campaign_id, Lead.status == LeadStatus.RESEARCH_COMPLETE).count(),
+        "write_emails": db.query(Lead).filter(Lead.campaign_id == campaign_id, Lead.status == LeadStatus.QUALIFIED).count(),
+    }
+
+    dispatched = []
+    if counts["find_emails"] > 0:
+        process_email_discovery_task.delay(campaign_id=campaign_id)
+        dispatched.append("find_emails")
+    if counts["research"] > 0:
+        process_lead_research_task.delay(campaign_id=campaign_id)
+        dispatched.append("research")
+    if counts["qualify"] > 0:
+        process_qualification_task.delay(campaign_id=campaign_id)
+        dispatched.append("qualify")
+    if counts["write_emails"] > 0:
+        process_email_writing_task.delay(campaign_id=campaign_id)
+        dispatched.append("write_emails")
+
+    if not dispatched:
+        return {"message": "Nothing pending — pipeline is already caught up.", "dispatched": [], "pending_counts": counts}
+
+    return {
+        "message": f"Resumed: dispatched {', '.join(dispatched)}.",
+        "dispatched": dispatched,
+        "pending_counts": counts,
+    }
