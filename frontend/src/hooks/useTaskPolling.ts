@@ -3,7 +3,7 @@ import { tasksApi } from '../services/api/tasks';
 import { QUERY_KEYS } from '../services/api/keys';
 import type { TaskStatusResponse } from '../types/api';
 
-export const TASK_POLL_INTERVAL_MS = 2000;
+export const TASK_POLL_INTERVAL_MS = 5000;
 
 /**
  * Polls GET /tasks/{task_id}/status every ~2s until `ready === true`, then stops.
