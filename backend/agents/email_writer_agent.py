@@ -5,6 +5,7 @@ from config import AUTO_APPROVE_CONFIDENCE_THRESHOLD
 from models.lead import Lead, LeadStatus
 from models.lead_research import LeadResearch
 from models.email_draft import EmailDraft
+from models.campaign import Campaign
 from services.groq_service import generate_cold_email
 
 logger = logging.getLogger(__name__)
@@ -15,9 +16,10 @@ def write_email_for_lead(lead: Lead, db: Session) -> tuple[bool, str]:
     Generates a personalized cold email for a qualified lead idempotently.
 
     1. Load LeadResearch for lead
-    2. Call Groq API to generate email subject + body
-    3. Save or update draft in email_drafts table
-    4. Set lead status based on confidence score:
+    2. Load Campaign to retrieve the target service_description offer
+    3. Call Groq API to generate email subject + body pitching that service
+    4. Save or update draft in email_drafts table
+    5. Set lead status based on confidence score:
        - confidence_score >= AUTO_APPROVE_CONFIDENCE_THRESHOLD -> EMAIL_GENERATED
        - confidence_score < AUTO_APPROVE_CONFIDENCE_THRESHOLD  -> WAITING_APPROVAL
 
@@ -43,12 +45,20 @@ def write_email_for_lead(lead: Lead, db: Session) -> tuple[bool, str]:
 
     technologies_list = research.technologies if research.technologies else []
 
-    # Call Groq API to generate cold email copy
+    # Retrieve campaign's targeted service offer
+    service_description = ""
+    if lead.campaign_id:
+        campaign = db.query(Campaign).filter(Campaign.id == lead.campaign_id).first()
+        if campaign and campaign.service_description:
+            service_description = campaign.service_description
+
+    # Call Groq API to generate cold email copy tailored to the service offered
     email_data = generate_cold_email(
         company_name=lead.company_name,
         company_summary=research.company_summary or "",
         pain_points=pain_points_list,
-        technologies=technologies_list
+        technologies=technologies_list,
+        service_offered=service_description
     )
 
     if not email_data:

@@ -119,6 +119,54 @@ def _make_groq_request(messages: list[dict], temperature: float = 0.3, max_token
     return None
 
 
+def _extract_json_payload(content: str | None) -> dict | None:
+    """
+    Robustly extracts and parses JSON dictionary from LLM response text,
+    handling markdown fences (```json ... ```), leading/trailing text, and unicode.
+    """
+    if not content:
+        return None
+
+    raw = content.strip()
+
+    # 1. Try direct parsing
+    try:
+        data = json.loads(raw)
+        if isinstance(data, dict):
+            return data
+    except json.JSONDecodeError:
+        pass
+
+    # 2. Extract from markdown code blocks
+    if "```" in raw:
+        parts = raw.split("```")
+        for part in parts:
+            block = part.strip()
+            if block.startswith("json"):
+                block = block[4:].strip()
+            if block.startswith("{") and block.endswith("}"):
+                try:
+                    data = json.loads(block)
+                    if isinstance(data, dict):
+                        return data
+                except json.JSONDecodeError:
+                    pass
+
+    # 3. Find outermost matching curly braces { ... }
+    start_idx = raw.find("{")
+    end_idx = raw.rfind("}")
+    if start_idx != -1 and end_idx != -1 and end_idx > start_idx:
+        candidate = raw[start_idx:end_idx + 1].strip()
+        try:
+            data = json.loads(candidate)
+            if isinstance(data, dict):
+                return data
+        except json.JSONDecodeError:
+            pass
+
+    return None
+
+
 def generate_company_research(company_name: str, company_text: str) -> dict | None:
     """
     Sends cleaned company website text to Groq LLM and asks it
@@ -162,55 +210,52 @@ def generate_company_research(company_name: str, company_text: str) -> dict | No
     if not content:
         return None
 
-    try:
-        content = content.strip()
-        if content.startswith("```"):
-            lines = content.split("\n")
-            lines = [l for l in lines if not l.strip().startswith("```")]
-            content = "\n".join(lines)
-
-        research = json.loads(content)
-
-        required_keys = [
-            "company_summary",
-            "business_model",
-            "technologies",
-            "possible_pain_points",
-            "personalization_angles"
-        ]
-        for key in required_keys:
-            if key not in research:
-                logger.warning("Groq research response missing required key '%s'", key)
-                return None
-
-        return research
-
-    except json.JSONDecodeError as e:
-        logger.error("Groq service: failed to parse JSON from research response: %s", e)
+    research = _extract_json_payload(content)
+    if not research:
+        logger.error("Groq service: failed to parse JSON from research response: %s", content[:200])
         return None
+
+    required_keys = [
+        "company_summary",
+        "business_model",
+        "technologies",
+        "possible_pain_points",
+        "personalization_angles"
+    ]
+    for key in required_keys:
+        if key not in research:
+            logger.warning("Groq research response missing required key '%s'", key)
+            return None
+
+    return research
 
 
 def generate_campaign_plan(prompt: str) -> dict | None:
     """
-    Turns a one-line description of an ideal customer (e.g. "Find dentists
-    in Texas with fewer than 20 employees") into structured campaign setup
-    fields. Returned as a SUGGESTION for the user to review/edit — nothing
-    calling this creates a campaign automatically.
+    Turns a description of a target niche/audience into structured campaign setup fields.
+    The sender is a software developer offering technical services (software engineering,
+    AI integrations, automations, web/mobile apps, APIs, maintenance).
+    For each campaign, 1-3 relevant technical services are selected based on the target audience.
     """
     system_prompt = (
-        "You are a B2B outreach strategist. Given a one-line description of "
-        "who someone wants to reach, produce a structured JSON campaign plan. "
+        "You are an expert B2B outreach strategist for a software developer.\n"
+        "Sender Profile: A skilled software developer offering software engineering, AI integration, "
+        "automation, web/mobile apps, custom APIs, database design, and maintenance services.\n\n"
+        "Core Rule: For each campaign, determine the target audience from the user's prompt, select the "
+        "1-3 MOST RELEVANT technical/software services that solve this specific audience's business or operational bottlenecks, "
+        "and use those 1-3 services consistently across the plan.\n"
+        "Negative Constraint: NEVER invent non-technical services (such as generic digital marketing, SEO, social media ads, or sales coaching). "
+        "The offer must strictly be software/technical solutions.\n\n"
         "Respond ONLY with valid JSON. No markdown, no extra text.\n\n"
         "Required JSON format:\n"
         "{\n"
         '  "campaign_name": "short descriptive name",\n'
         '  "industry": "the niche/industry",\n'
         '  "location": "primary target location",\n'
-        '  "ideal_customer": "1-2 sentence description of the target customer",\n'
-        '  "pain_points": ["likely", "business", "pain", "points"],\n'
-        '  "search_queries": ["4-6 specific varied search queries covering different'
-        ' cities/sub-niches/angles of this target — not just one generic query"],\n'
-        '  "email_angle": "the core angle/hook a cold email to this audience should use",\n'
+        '  "ideal_customer": "1-2 sentence description of who within this target audience should buy these technical services",\n'
+        '  "pain_points": ["likely", "technical", "or", "operational", "pain", "points"],\n'
+        '  "search_queries": ["4-6 specific varied search queries covering different cities/sub-niches/angles of this target — not just one generic query"],\n'
+        '  "email_angle": "a clear 1-2 sentence description of the 1-3 specific software/technical services offered to solve their bottlenecks",\n'
         '  "qualification_rules": ["specific", "criteria", "for", "a", "good", "fit"]\n'
         "}"
     )
@@ -224,26 +269,18 @@ def generate_campaign_plan(prompt: str) -> dict | None:
     if not content:
         return None
 
-    try:
-        content = content.strip()
-        if content.startswith("```"):
-            lines = content.split("\n")
-            lines = [l for l in lines if not l.strip().startswith("```")]
-            content = "\n".join(lines)
-
-        plan = json.loads(content)
-
-        required_keys = ["campaign_name", "industry", "location", "ideal_customer", "search_queries"]
-        for key in required_keys:
-            if key not in plan:
-                logger.warning("Groq campaign plan response missing required key '%s'", key)
-                return None
-
-        return plan
-
-    except json.JSONDecodeError as e:
-        logger.error("Groq service: failed to parse JSON from campaign plan response: %s", e)
+    plan = _extract_json_payload(content)
+    if not plan:
+        logger.error("Groq service: failed to parse JSON from campaign plan response: %s", content[:200])
         return None
+
+    required_keys = ["campaign_name", "industry", "location", "ideal_customer", "search_queries"]
+    for key in required_keys:
+        if key not in plan:
+            logger.warning("Groq campaign plan response missing required key '%s'", key)
+            return None
+
+    return plan
 
 
 def check_email_quality_ai(subject: str, body: str) -> dict | None:
@@ -272,34 +309,34 @@ def check_email_quality_ai(subject: str, body: str) -> dict | None:
     content = _make_groq_request(messages=messages, temperature=0.3, max_tokens=512)
     if not content:
         return None
-    try:
-        content = content.strip()
-        if content.startswith("```"):
-            lines = [l for l in content.split("\n") if not l.strip().startswith("```")]
-            content = "\n".join(lines)
-        return json.loads(content)
-    except json.JSONDecodeError as e:
-        logger.error("Groq service: failed to parse JSON from quality review response: %s", e)
+
+    quality = _extract_json_payload(content)
+    if not quality:
+        logger.error("Groq service: failed to parse JSON from quality review response: %s", content[:200])
         return None
+
+    return quality
 
 
 def generate_cold_email(
     company_name: str,
     company_summary: str,
     pain_points: list,
-    technologies: list
+    technologies: list,
+    service_offered: str = ""
 ) -> dict | None:
     """
     Sends company research context to Groq LLM and asks it
-    to generate a personalized cold email.
+    to generate a personalized cold email pitching the specified software service.
 
     Returns a validated dict with keys: subject, body
     Returns None if the API call fails or the response is not valid JSON.
     """
     system_prompt = (
-        "You are an expert cold email copywriter. "
-        "Given company research data, write a short personalized cold email. "
-        "The email must be professional, concise, and under 150 words. "
+        "You are an expert cold email copywriter for a software developer. "
+        "Given company research data and the specific software service/offer being pitched, "
+        "write a short, highly personalized cold email offering that technical solution. "
+        "The email must be professional, concise, direct, and under 150 words. "
         "Do NOT use HTML. Plain text only. "
         "Respond ONLY with valid JSON. No markdown, no extra text.\n\n"
         "Required JSON format:\n"
@@ -311,13 +348,15 @@ def generate_cold_email(
 
     pain_points_str = ", ".join(pain_points) if pain_points else "unknown"
     technologies_str = ", ".join(technologies) if technologies else "unknown"
+    offer_str = service_offered.strip() if service_offered else "Custom software development, automation, and AI integrations"
 
     user_prompt = (
         f"Company name: {company_name}\n"
         f"Company summary: {company_summary}\n"
         f"Their technologies: {technologies_str}\n"
-        f"Their possible pain points: {pain_points_str}\n\n"
-        "Write a cold email offering help with one of their pain points."
+        f"Their possible pain points: {pain_points_str}\n"
+        f"Our service/offer: {offer_str}\n\n"
+        "Write a cold email offering our specific service to address one of their pain points."
     )
 
     messages = [
@@ -329,26 +368,18 @@ def generate_cold_email(
     if not content:
         return None
 
-    try:
-        content = content.strip()
-        if content.startswith("```"):
-            lines = content.split("\n")
-            lines = [l for l in lines if not l.strip().startswith("```")]
-            content = "\n".join(lines)
-
-        email_data = json.loads(content)
-
-        required_keys = ["subject", "body"]
-        for key in required_keys:
-            if key not in email_data:
-                logger.warning("Groq cold email response missing required key '%s'", key)
-                return None
-
-        return email_data
-
-    except json.JSONDecodeError as e:
-        logger.error("Groq service: failed to parse JSON from cold email response: %s", e)
+    email_data = _extract_json_payload(content)
+    if not email_data:
+        logger.error("Groq service: failed to parse JSON from cold email response: %s", content[:200])
         return None
+
+    required_keys = ["subject", "body"]
+    for key in required_keys:
+        if key not in email_data:
+            logger.warning("Groq cold email response missing required key '%s'", key)
+            return None
+
+    return email_data
 
 
 def generate_followup_email(company_name: str, original_subject: str) -> dict | None:
@@ -383,23 +414,15 @@ def generate_followup_email(company_name: str, original_subject: str) -> dict | 
     if not content:
         return None
 
-    try:
-        content = content.strip()
-        if content.startswith("```"):
-            lines = content.split("\n")
-            lines = [l for l in lines if not l.strip().startswith("```")]
-            content = "\n".join(lines)
-
-        followup_data = json.loads(content)
-
-        required_keys = ["subject", "body"]
-        for key in required_keys:
-            if key not in followup_data:
-                logger.warning("Groq follow-up email response missing required key '%s'", key)
-                return None
-
-        return followup_data
-
-    except json.JSONDecodeError as e:
-        logger.error("Groq service: failed to parse JSON from follow-up response: %s", e)
+    followup_data = _extract_json_payload(content)
+    if not followup_data:
+        logger.error("Groq service: failed to parse JSON from follow-up response: %s", content[:200])
         return None
+
+    required_keys = ["subject", "body"]
+    for key in required_keys:
+        if key not in followup_data:
+            logger.warning("Groq follow-up email response missing required key '%s'", key)
+            return None
+
+    return followup_data
