@@ -6,7 +6,7 @@ load_dotenv()
 # Groq API Configuration
 GROQ_API_KEY = os.getenv("GROQ_API_KEY")
 GROQ_API_URL = os.getenv("GROQ_API_URL", "https://api.groq.com/openai/v1/chat/completions")
-GROQ_MODEL = os.getenv("GROQ_MODEL", "llama-3.1-8b-instant")
+GROQ_MODEL = os.getenv("GROQ_MODEL", "llama-3.3-70b-versatile")
 GROQ_MAX_RETRIES = int(os.getenv("GROQ_MAX_RETRIES", "3"))
 GROQ_INITIAL_RETRY_DELAY = float(os.getenv("GROQ_INITIAL_RETRY_DELAY", "1.0"))
 GROQ_MAX_RETRY_DELAY = float(os.getenv("GROQ_MAX_RETRY_DELAY", "16.0"))
