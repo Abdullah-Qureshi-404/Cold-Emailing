@@ -325,7 +325,7 @@ def generate_cold_email(
         {"role": "user", "content": user_prompt}
     ]
 
-    content = _make_groq_request(messages=messages, temperature=0.5, max_tokens=512)
+    content = _make_groq_request(messages=messages, temperature=0.5, max_tokens=1024)
     if not content:
         return None
 
@@ -379,7 +379,7 @@ def generate_followup_email(company_name: str, original_subject: str) -> dict | 
         {"role": "user", "content": user_prompt}
     ]
 
-    content = _make_groq_request(messages=messages, temperature=0.5, max_tokens=256)
+    content = _make_groq_request(messages=messages, temperature=0.5, max_tokens=512)
     if not content:
         return None
 
