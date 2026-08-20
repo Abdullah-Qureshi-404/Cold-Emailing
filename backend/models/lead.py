@@ -1,4 +1,4 @@
-from sqlalchemy import Column, Integer, String, Enum, DateTime, ForeignKey, JSON, Boolean
+from sqlalchemy import Column, Integer, String, Enum, DateTime, ForeignKey, JSON, Boolean, Index
 from sqlalchemy.sql import func
 from sqlalchemy.orm import relationship
 from database import Base
@@ -32,6 +32,11 @@ class LeadStatus(enum.Enum):
 
 class Lead(Base):
     __tablename__ = "leads"
+
+    __table_args__ = (
+        Index("ix_leads_campaign_status", "campaign_id", "status"),
+        Index("ix_leads_campaign_created", "campaign_id", "created_at"),
+    )
 
     id = Column(
         Integer,

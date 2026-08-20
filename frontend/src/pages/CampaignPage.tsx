@@ -156,9 +156,10 @@ export const CampaignPage: React.FC = () => {
     queryKey: ['campaign-processing-status', campaignId],
     queryFn: () => campaignsApi.getProcessingStatus(campaignId),
     enabled: !!campaignId,
+    staleTime: 5000,
     refetchInterval: (query) => {
       const data = query.state.data
-      return data?.is_processing ? 3000 : 8000
+      return data?.is_processing ? 6000 : 15000
     },
   })
 
@@ -168,7 +169,8 @@ export const CampaignPage: React.FC = () => {
     queryKey: ['leads-list', campaignId, 'needs_follow_up'],
     queryFn: () => leadsApi.getLeads(campaignId, { stage: 'needs_follow_up', pageSize: 100 }),
     enabled: !!campaignId && followUpOpen,
-    refetchInterval: anyTaskRunning ? 3000 : false,
+    staleTime: 10000,
+    refetchInterval: anyTaskRunning ? 10000 : false,
   })
 
   const runDispatch = async (

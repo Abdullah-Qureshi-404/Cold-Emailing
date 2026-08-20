@@ -104,7 +104,6 @@ def get_campaign_dashboard(campaign_id: int, db: Session = Depends(get_db)):
         raise HTTPException(status_code=404, detail="Campaign not found")
 
     total_leads = db.query(Lead).filter(Lead.campaign_id == campaign_id).count()
-
     # Derive emails_sent / followups_sent from actual EmailLog send events rather
     # than current lead status, so a lead moving on to REPLIED/COLD after a
     # followup doesn't make either counter shrink or double-count the other.
@@ -118,52 +117,45 @@ def get_campaign_dashboard(campaign_id: int, db: Session = Depends(get_db)):
     emails_sent = len(sent_log_counts)
     followups_sent = sum(1 for _, sent_count in sent_log_counts if sent_count > 1)
 
-    replies = db.query(Lead).filter(
-        Lead.campaign_id == campaign_id,
-        Lead.status == LeadStatus.REPLIED
-    ).count()
-
-    reply_rate = round((replies / emails_sent * 100), 1) if emails_sent > 0 else 0.0
-
     qualified_or_later = [
         LeadStatus.QUALIFIED, LeadStatus.EMAIL_GENERATED, LeadStatus.WAITING_APPROVAL,
         LeadStatus.QUEUED, LeadStatus.SENT, LeadStatus.FOLLOWUP_1, LeadStatus.FOLLOWUP_2,
         LeadStatus.REPLIED, LeadStatus.COLD,
     ]
-    qualified_leads = db.query(Lead).filter(
-        Lead.campaign_id == campaign_id,
-        Lead.status.in_(qualified_or_later)
-    ).count()
 
-    disqualified_leads = db.query(Lead).filter(
-        Lead.campaign_id == campaign_id,
-        Lead.status == LeadStatus.DISQUALIFIED
-    ).count()
+    # Single multi-count SQL query for all lead status breakdowns
+    lead_stats = db.query(
+        sql_func.count(Lead.id).label("total_leads"),
+        sql_func.count(Lead.id).filter(Lead.status == LeadStatus.REPLIED).label("replies"),
+        sql_func.count(Lead.id).filter(Lead.status.in_(qualified_or_later)).label("qualified_leads"),
+        sql_func.count(Lead.id).filter(Lead.status == LeadStatus.DISQUALIFIED).label("disqualified_leads"),
+        sql_func.count(Lead.id).filter(Lead.status == LeadStatus.COLD).label("cold_leads"),
+        sql_func.count(Lead.id).filter(Lead.status == LeadStatus.WAITING_APPROVAL).label("waiting_approval"),
+    ).filter(Lead.campaign_id == campaign_id).first()
 
-    cold_leads = db.query(Lead).filter(
-        Lead.campaign_id == campaign_id,
-        Lead.status == LeadStatus.COLD
-    ).count()
+    total_leads = (lead_stats.total_leads or 0) if lead_stats else 0
+    replies = (lead_stats.replies or 0) if lead_stats else 0
+    qualified_leads = (lead_stats.qualified_leads or 0) if lead_stats else 0
+    disqualified_leads = (lead_stats.disqualified_leads or 0) if lead_stats else 0
+    cold_leads = (lead_stats.cold_leads or 0) if lead_stats else 0
+    waiting_approval = (lead_stats.waiting_approval or 0) if lead_stats else 0
+
+    reply_rate = round((replies / emails_sent * 100), 1) if emails_sent > 0 else 0.0
 
     # Cumulative count of drafts ever generated for this campaign
     emails_generated = (
-        db.query(EmailDraft)
+        db.query(sql_func.count(EmailDraft.id))
         .join(Lead, EmailDraft.lead_id == Lead.id)
         .filter(Lead.campaign_id == campaign_id)
-        .count()
+        .scalar() or 0
     )
-
-    waiting_approval = db.query(Lead).filter(
-        Lead.campaign_id == campaign_id,
-        Lead.status == LeadStatus.WAITING_APPROVAL
-    ).count()
 
     # Cumulative count of researched leads ever completed
     research_complete = (
-        db.query(LeadResearch)
+        db.query(sql_func.count(LeadResearch.id))
         .join(Lead, LeadResearch.lead_id == Lead.id)
         .filter(Lead.campaign_id == campaign_id)
-        .count()
+        .scalar() or 0
     )
 
     return {
@@ -184,7 +176,6 @@ def get_campaign_dashboard(campaign_id: int, db: Session = Depends(get_db)):
     }
 
 
-
 @router.get("/{campaign_id}/pipeline-progress", response_model=PipelineProgress)
 def get_pipeline_progress(campaign_id: int, db: Session = Depends(get_db)):
     """
@@ -197,35 +188,34 @@ def get_pipeline_progress(campaign_id: int, db: Session = Depends(get_db)):
     if not campaign:
         raise HTTPException(status_code=404, detail="Campaign not found")
 
-    leads_found = db.query(Lead).filter(Lead.campaign_id == campaign_id).count()
-
-    emails_found = db.query(Lead).filter(
-        Lead.campaign_id == campaign_id,
-        Lead.email.isnot(None)
-    ).count()
-
-    research_done = (
-        db.query(LeadResearch)
-        .join(Lead, LeadResearch.lead_id == Lead.id)
-        .filter(Lead.campaign_id == campaign_id)
-        .count()
-    )
-
     qualified_or_later = [
         LeadStatus.QUALIFIED, LeadStatus.EMAIL_GENERATED, LeadStatus.WAITING_APPROVAL,
         LeadStatus.QUEUED, LeadStatus.SENT, LeadStatus.FOLLOWUP_1, LeadStatus.FOLLOWUP_2,
         LeadStatus.REPLIED, LeadStatus.COLD,
     ]
-    qualified_done = db.query(Lead).filter(
-        Lead.campaign_id == campaign_id,
-        Lead.status.in_(qualified_or_later)
-    ).count()
+
+    lead_stats = db.query(
+        sql_func.count(Lead.id).label("leads_found"),
+        sql_func.count(Lead.id).filter(Lead.email.isnot(None)).label("emails_found"),
+        sql_func.count(Lead.id).filter(Lead.status.in_(qualified_or_later)).label("qualified_done"),
+    ).filter(Lead.campaign_id == campaign_id).first()
+
+    leads_found = (lead_stats.leads_found or 0) if lead_stats else 0
+    emails_found = (lead_stats.emails_found or 0) if lead_stats else 0
+    qualified_done = (lead_stats.qualified_done or 0) if lead_stats else 0
+
+    research_done = (
+        db.query(sql_func.count(LeadResearch.id))
+        .join(Lead, LeadResearch.lead_id == Lead.id)
+        .filter(Lead.campaign_id == campaign_id)
+        .scalar() or 0
+    )
 
     emails_written = (
-        db.query(EmailDraft)
+        db.query(sql_func.count(EmailDraft.id))
         .join(Lead, EmailDraft.lead_id == Lead.id)
         .filter(Lead.campaign_id == campaign_id)
-        .count()
+        .scalar() or 0
     )
 
     return PipelineProgress(
@@ -340,60 +330,37 @@ def get_campaign_processing_status(campaign_id: int, db: Session = Depends(get_d
         raise HTTPException(status_code=404, detail="Campaign not found")
 
     status_str = campaign.status.value if hasattr(campaign.status, "value") else str(campaign.status)
-    total_leads = db.query(Lead).filter(Lead.campaign_id == campaign_id).count()
 
-    # Query counts across pipeline stages
-    finding_emails_count = db.query(Lead).filter(
-        Lead.campaign_id == campaign_id,
-        Lead.status.in_([LeadStatus.FOUND, LeadStatus.EMAIL_SEARCHING])
-    ).count()
+    # Consolidated single SQL query across all pipeline stage counts
+    stats = db.query(
+        sql_func.count(Lead.id).label("total"),
+        sql_func.count(Lead.id).filter(Lead.status.in_([LeadStatus.FOUND, LeadStatus.EMAIL_SEARCHING])).label("finding_emails"),
+        sql_func.count(Lead.id).filter(Lead.status.in_([LeadStatus.EMAIL_FOUND, LeadStatus.RESEARCH_PENDING])).label("researching"),
+        sql_func.count(Lead.id).filter((Lead.status == LeadStatus.RESEARCH_COMPLETE) & (Lead.qualification_reason.is_(None))).label("qualifying"),
+        sql_func.count(Lead.id).filter(Lead.status == LeadStatus.QUALIFIED).label("qualified"),
+        sql_func.count(Lead.id).filter(Lead.status.in_([LeadStatus.EMAIL_GENERATED, LeadStatus.WAITING_APPROVAL])).label("email_generated"),
+        sql_func.count(Lead.id).filter(Lead.status == LeadStatus.DISQUALIFIED).label("disqualified"),
+        sql_func.count(Lead.id).filter(Lead.status.in_([LeadStatus.SENT, LeadStatus.FOLLOWUP_1, LeadStatus.FOLLOWUP_2, LeadStatus.REPLIED, LeadStatus.COLD])).label("sent"),
+        sql_func.count(Lead.id).filter(Lead.status == LeadStatus.EMAIL_NOT_FOUND).label("email_not_found"),
+    ).filter(Lead.campaign_id == campaign_id).first()
 
-    researching_count = db.query(Lead).filter(
-        Lead.campaign_id == campaign_id,
-        Lead.status.in_([LeadStatus.EMAIL_FOUND, LeadStatus.RESEARCH_PENDING])
-    ).count()
+    total_leads = (stats.total or 0) if stats else 0
+    finding_emails_count = (stats.finding_emails or 0) if stats else 0
+    researching_count = (stats.researching or 0) if stats else 0
+    qualifying_count = (stats.qualifying or 0) if stats else 0
+    qualified_count = (stats.qualified or 0) if stats else 0
+    email_generated_count = (stats.email_generated or 0) if stats else 0
+    disqualified_count = (stats.disqualified or 0) if stats else 0
+    sent_count = (stats.sent or 0) if stats else 0
+    email_not_found_count = (stats.email_not_found or 0) if stats else 0
 
-    qualifying_count = db.query(Lead).filter(
-        Lead.campaign_id == campaign_id,
-        Lead.status == LeadStatus.RESEARCH_COMPLETE,
-        Lead.qualification_reason.is_(None)
-    ).count()
-
-    # Qualified leads that do not yet have an EmailDraft
-    drafted_lead_ids = db.query(EmailDraft.lead_id).filter(
-        EmailDraft.lead_id == Lead.id,
-        Lead.campaign_id == campaign_id
+    drafts_count = (
+        db.query(sql_func.count(EmailDraft.id))
+        .join(Lead, EmailDraft.lead_id == Lead.id)
+        .filter(Lead.campaign_id == campaign_id)
+        .scalar() or 0
     )
-    generating_emails_count = db.query(Lead).filter(
-        Lead.campaign_id == campaign_id,
-        Lead.status == LeadStatus.QUALIFIED,
-        ~Lead.id.in_(drafted_lead_ids)
-    ).count()
-
-    qualified_count = db.query(Lead).filter(
-        Lead.campaign_id == campaign_id,
-        Lead.status == LeadStatus.QUALIFIED
-    ).count()
-
-    email_generated_count = db.query(Lead).filter(
-        Lead.campaign_id == campaign_id,
-        Lead.status.in_([LeadStatus.EMAIL_GENERATED, LeadStatus.WAITING_APPROVAL])
-    ).count()
-
-    disqualified_count = db.query(Lead).filter(
-        Lead.campaign_id == campaign_id,
-        Lead.status == LeadStatus.DISQUALIFIED
-    ).count()
-
-    sent_count = db.query(Lead).filter(
-        Lead.campaign_id == campaign_id,
-        Lead.status.in_([LeadStatus.SENT, LeadStatus.FOLLOWUP_1, LeadStatus.FOLLOWUP_2, LeadStatus.REPLIED, LeadStatus.COLD])
-    ).count()
-
-    email_not_found_count = db.query(Lead).filter(
-        Lead.campaign_id == campaign_id,
-        Lead.status == LeadStatus.EMAIL_NOT_FOUND
-    ).count()
+    generating_emails_count = max(0, qualified_count - drafts_count) if qualified_count > 0 else 0
 
     progress = CampaignProcessingProgress(
         total=total_leads,

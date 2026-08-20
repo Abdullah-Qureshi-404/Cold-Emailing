@@ -21,11 +21,14 @@ if not DATABASE_URL:
         "See backend/.env.example for setup instructions."
     )
 
-# Pool sized for concurrent Celery task processing (worker runs with
-# --concurrency=16, and research/email-writing tasks each open a pool of
-# per-lead threads) — the SQLAlchemy default (5 + 10 overflow) was too small
-# and caused "QueuePool limit... connection timed out" errors under load.
-engine = create_engine(DATABASE_URL, pool_size=20, max_overflow=20, pool_timeout=60)
+engine = create_engine(
+    DATABASE_URL,
+    pool_size=20,
+    max_overflow=20,
+    pool_timeout=60,
+    pool_recycle=300,
+    pool_pre_ping=True,
+)
 SessionLocal = sessionmaker(autocommit=False, autoflush=False, bind=engine)
 Base = declarative_base()
 
