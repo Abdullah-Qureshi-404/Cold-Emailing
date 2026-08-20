@@ -4,18 +4,20 @@ import json
 
 def normalize_google_maps_lead(row: dict, campaign_id: int) -> dict:
     """
-    Takes a raw row from gosom google-maps-scraper CSV
+    Takes a raw row from gosom google-maps-scraper (CSV or JSON dict)
     and converts to our standard Lead format dictionary.
     """
-    company_name = row.get("title", "").strip() or "Unknown Company"
-    website = row.get("website", "").strip() or None
-    phone = row.get("phone", "").strip() or None
-    email = None  # Email finder will handle this later
+    company_name = (
+        row.get("title") or row.get("name") or row.get("company_name") or ""
+    ).strip() or "Unknown Company"
+    website = (row.get("website") or row.get("web_site") or row.get("site") or "").strip() or None
+    phone = (row.get("phone") or row.get("phone_number") or "").strip() or None
+    email = (row.get("email") or "").strip() or None
 
     return {
         "campaign_id": campaign_id,
         "company_name": company_name,
-        "contact_name": None,
+        "contact_name": (row.get("contact_name") or "").strip() or None,
         "website": website,
         "phone": phone,
         "email": email,
@@ -24,11 +26,13 @@ def normalize_google_maps_lead(row: dict, campaign_id: int) -> dict:
         "twitter_url": None,
         "status": "found",
         "raw_data": {
-            "address": row.get("address", ""),
-            "category": row.get("category", ""),
-            "rating": row.get("review_rating", ""),
-            "review_count": row.get("review_count", ""),
-            "link": row.get("link", "")
+            "address": row.get("address") or row.get("full_address") or "",
+            "category": row.get("category") or row.get("categories") or "",
+            "rating": str(row.get("review_rating") or row.get("rating") or ""),
+            "review_count": str(row.get("review_count") or row.get("reviews") or ""),
+            "link": row.get("link") or row.get("url") or row.get("google_maps_url") or "",
+            "latitude": row.get("latitude") or row.get("lat"),
+            "longitude": row.get("longitude") or row.get("lon") or row.get("lng"),
         }
     }
 

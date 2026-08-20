@@ -399,11 +399,11 @@ export const CampaignPage: React.FC = () => {
               />
               <ActionButton
                 icon={Search}
-                label="Google Maps ⚠"
+                label="Google Maps"
                 variant="secondary"
                 busy={busy('scrape')}
                 disabled={anyTaskRunning}
-                title="Known limitation in this environment: this needs Docker access the server container doesn't have, so it currently fails with a 'docker not found' error. Use Hacker News or Import CSV instead until this is fixed."
+                title="Searches Google Maps for local businesses matching query and location, extracting name, website, phone, address, and ratings."
                 onClick={() => runDispatch('scrape', 'Scrape Google Maps leads', () => leadsApi.scrapeLeads(campaignId, query, location))}
               />
               <ActionButton
