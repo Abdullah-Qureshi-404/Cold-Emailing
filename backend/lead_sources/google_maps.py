@@ -31,12 +31,14 @@ def _create_job(full_query: str, campaign_id: int) -> str:
     logger.info("Submitting Google Maps scrape job to %s with payload: %s", endpoint, payload)
     try:
         resp = requests.post(endpoint, json=payload, timeout=15)
+        if not resp.ok:
+            logger.error("Google Maps scraper error %d: %s", resp.status_code, resp.text)
         resp.raise_for_status()
     except requests.exceptions.RequestException as e:
-        logger.error("Failed to connect to Google Maps scraper at %s: %s", endpoint, e)
+        err_detail = getattr(e.response, "text", str(e)) if hasattr(e, "response") and e.response is not None else str(e)
+        logger.error("Failed to connect to Google Maps scraper at %s: %s (detail: %s)", endpoint, e, err_detail)
         raise RuntimeError(
-            f"Unable to communicate with Google Maps scraper service at {SCRAPER_URL}. "
-            "Ensure the scraper service is running."
+            f"Google Maps scraper service returned error at {endpoint}: {err_detail}"
         ) from e
 
     data = resp.json() if resp.content else {}
