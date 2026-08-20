@@ -108,6 +108,7 @@ def root():
 def health_check():
     from database import SessionLocal
     from services.redis_lock import get_redis_client
+    from sqlalchemy import text
     import time
 
     db_status = "unknown"
@@ -115,7 +116,7 @@ def health_check():
     start = time.time()
     try:
         db = SessionLocal()
-        db.execute(sql_func.text("SELECT 1") if hasattr(sql_func, "text") else "SELECT 1")
+        db.execute(text("SELECT 1"))
         db.close()
         db_status = "connected"
         db_latency_ms = round((time.time() - start) * 1000, 1)
