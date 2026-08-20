@@ -24,6 +24,7 @@ def _create_job(full_query: str, campaign_id: int) -> str:
         "name": f"campaign-{campaign_id}-{int(time.time())}",
         "keywords": [full_query],
         "depth": 1,
+        "max_time": 180,
         "fast_mode": True,
         "lang": "en"
     }
