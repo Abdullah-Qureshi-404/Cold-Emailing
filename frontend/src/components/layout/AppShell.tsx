@@ -5,7 +5,6 @@ import { Sidebar } from './Sidebar'
 import { Navbar } from './Navbar'
 import { BackendStatusBanner } from './BackendStatusBanner'
 import { CommandPalette } from './CommandPalette'
-import { AIDrawer } from './AIDrawer'
 import { TaskActivityDrawer } from './TaskActivityDrawer'
 import { useActiveCampaignSync } from '../../hooks/useActiveCampaignSync'
 
@@ -49,7 +48,6 @@ export const AppShell: React.FC = () => {
 
       {/* Overlays */}
       <CommandPalette />
-      <AIDrawer />
       {/* Always mounted: polls in-flight Celery tasks even while closed. */}
       <TaskActivityDrawer />
     </div>

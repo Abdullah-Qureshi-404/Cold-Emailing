@@ -1,7 +1,7 @@
 from pathlib import Path
 
 from fastapi import APIRouter, HTTPException, Depends, Response
-from sqlalchemy.orm import Session
+from sqlalchemy.orm import Session, joinedload
 from sqlalchemy import func as sql_func
 from datetime import datetime
 
@@ -82,7 +82,7 @@ def list_leads(
     Paginated via `page`/`page_size`; total matching count (before paging)
     is returned in the `X-Total-Count` response header.
     """
-    query = db.query(Lead).filter(Lead.campaign_id == campaign_id)
+    query = db.query(Lead).options(joinedload(Lead.research)).filter(Lead.campaign_id == campaign_id)
 
     if stage == "email_found":
         query = query.filter(Lead.email.isnot(None))
@@ -94,7 +94,7 @@ def list_leads(
         query = query.filter(Lead.status.in_(QUALIFIED_OR_LATER))
     elif stage == "disqualified":
         query = query.filter(Lead.status == LeadStatus.DISQUALIFIED)
-    elif stage == "drafted":
+    elif stage in ["drafted", "email_generated"]:
         query = query.filter(Lead.status.in_(DRAFTED_OR_LATER))
     elif stage == "needs_follow_up":
         query = query.filter(
@@ -427,7 +427,9 @@ def get_email_drafts(
     """
     Returns all email drafts for leads in the specified campaign.
     """
-    drafts = db.query(EmailDraft).join(Lead).filter(
+    drafts = db.query(EmailDraft).join(Lead).options(
+        joinedload(EmailDraft.lead).joinedload(Lead.research)
+    ).filter(
         Lead.campaign_id == campaign_id
     ).order_by(EmailDraft.created_at.desc()).all()
 

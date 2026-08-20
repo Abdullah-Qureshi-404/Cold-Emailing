@@ -7,6 +7,7 @@ import { ActiveCampaignsWidget } from '../components/ActiveCampaignsWidget';
 import { AIDraftReviewPreview } from '../components/AIDraftReviewPreview';
 import { CampaignExecutionTimeline } from '../components/CampaignExecutionTimeline';
 import { CampaignPerformanceSummary } from '../components/CampaignPerformanceSummary';
+import { SystemHealthCard } from '../components/SystemHealthCard';
 import { CreateCampaignModal } from '../../campaigns/components/CreateCampaignModal';
 import { useActiveCampaignSync } from '../../../hooks/useActiveCampaignSync';
 
@@ -65,6 +66,7 @@ export const DashboardPage: React.FC = () => {
         <div className="space-y-6">
           <CampaignExecutionTimeline />
           <CampaignPerformanceSummary />
+          <SystemHealthCard />
         </div>
       </div>
 

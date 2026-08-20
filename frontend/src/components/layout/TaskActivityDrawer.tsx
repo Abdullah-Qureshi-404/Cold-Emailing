@@ -1,9 +1,10 @@
 import React, { useEffect, useRef } from 'react';
-import { useQueryClient } from '@tanstack/react-query';
+import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { X, Activity, CheckCircle2, XCircle, Loader2, Clock, Trash2 } from 'lucide-react';
 import { useUIStore } from '../../store/useUIStore';
 import { useTaskStore, isTaskInFlight, type TrackedTask } from '../../store/useTaskStore';
 import { useTaskPolling, celeryStateToStatus } from '../../hooks/useTaskPolling';
+import { tasksApi } from '../../services/api/tasks';
 import { QUERY_KEYS } from '../../services/api/keys';
 import { formatRelativeTime } from '../../lib/utils';
 
@@ -129,7 +130,17 @@ export const TaskActivityDrawer: React.FC = () => {
   const tasks = useTaskStore((state) => state.tasks);
   const clearFinishedTasks = useTaskStore((state) => state.clearFinishedTasks);
 
+  // Fetch authentic background task activity from backend
+  const { data: backendActivity } = useQuery({
+    queryKey: ['tasks-activity'],
+    queryFn: tasksApi.getTaskActivity,
+    refetchInterval: isTaskDrawerOpen ? 5000 : 30000,
+    staleTime: 5000,
+  });
+
   const inFlight = tasks.filter(isTaskInFlight);
+  const runningBackendTasks = backendActivity?.filter((t) => t.status === 'running') ?? [];
+  const totalRunning = inFlight.length + runningBackendTasks.length;
 
   return (
     <>
@@ -154,7 +165,7 @@ export const TaskActivityDrawer: React.FC = () => {
                   <div>
                     <h2 className="text-sm font-semibold text-zinc-100">Background Task Activity</h2>
                     <p className="text-[11px] text-zinc-400">
-                      {inFlight.length} running · {tasks.length} total
+                      {totalRunning} active · {((backendActivity?.length ?? 0) + tasks.length)} total
                     </p>
                   </div>
                 </div>
@@ -168,15 +179,46 @@ export const TaskActivityDrawer: React.FC = () => {
 
               {/* Task List */}
               <div className="flex-1 space-y-3 overflow-y-auto p-5">
-                {tasks.length === 0 && (
+                {/* Real Backend Tasks */}
+                {backendActivity && backendActivity.length > 0 && (
+                  <div className="space-y-2 mb-4">
+                    <div className="text-[11px] font-semibold uppercase tracking-wider text-purple-300">
+                      Pipeline Production Activity
+                    </div>
+                    {backendActivity.map((act) => (
+                      <div key={act.id} className="rounded-lg border border-white/[0.06] bg-[#161619] p-3 space-y-2">
+                        <div className="flex items-start justify-between gap-3">
+                          <div className="min-w-0">
+                            <div className="text-xs font-semibold text-zinc-200 truncate">{act.label}</div>
+                            <div className="text-[10px] font-mono text-zinc-500 truncate">
+                              Campaign #{act.campaign_id} · {act.current} / {act.total} leads processed
+                            </div>
+                          </div>
+                          <TaskStatusBadge status={act.status} />
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+                )}
+
+                {/* Session Dispatched Tasks */}
+                {tasks.length > 0 && (
+                  <div className="space-y-2">
+                    <div className="text-[11px] font-semibold uppercase tracking-wider text-zinc-400">
+                      Session Dispatch Log
+                    </div>
+                    {tasks.map((task) => (
+                      <TaskRow key={task.id} task={task} />
+                    ))}
+                  </div>
+                )}
+
+                {tasks.length === 0 && (!backendActivity || backendActivity.length === 0) && (
                   <div className="rounded-lg border border-dashed border-white/10 p-8 text-center text-xs text-zinc-500 font-mono">
-                    No background tasks dispatched yet this session. Run a pipeline action from a
+                    No background tasks dispatched yet. Run a pipeline action from a
                     Campaign Workspace and its progress will appear here.
                   </div>
                 )}
-                {tasks.map((task) => (
-                  <TaskRow key={task.id} task={task} />
-                ))}
               </div>
 
               {/* Footer */}

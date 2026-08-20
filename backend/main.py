@@ -102,3 +102,37 @@ def root():
     return {
         "message": "Cold Email Platform Running"
     }
+
+
+@app.get("/health")
+def health_check():
+    from database import SessionLocal
+    from services.redis_lock import get_redis_client
+    import time
+
+    db_status = "unknown"
+    db_latency_ms = None
+    start = time.time()
+    try:
+        db = SessionLocal()
+        db.execute(sql_func.text("SELECT 1") if hasattr(sql_func, "text") else "SELECT 1")
+        db.close()
+        db_status = "connected"
+        db_latency_ms = round((time.time() - start) * 1000, 1)
+    except Exception as e:
+        db_status = f"error: {str(e)[:50]}"
+
+    redis_status = "disconnected"
+    try:
+        client = get_redis_client()
+        if client and client.ping():
+            redis_status = "connected"
+    except Exception as e:
+        redis_status = f"error: {str(e)[:50]}"
+
+    return {
+        "status": "healthy" if db_status == "connected" else "degraded",
+        "database": db_status,
+        "database_latency_ms": db_latency_ms,
+        "redis": redis_status,
+    }

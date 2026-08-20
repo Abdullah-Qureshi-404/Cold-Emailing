@@ -125,9 +125,14 @@ def get_campaign_dashboard(campaign_id: int, db: Session = Depends(get_db)):
 
     reply_rate = round((replies / emails_sent * 100), 1) if emails_sent > 0 else 0.0
 
+    qualified_or_later = [
+        LeadStatus.QUALIFIED, LeadStatus.EMAIL_GENERATED, LeadStatus.WAITING_APPROVAL,
+        LeadStatus.QUEUED, LeadStatus.SENT, LeadStatus.FOLLOWUP_1, LeadStatus.FOLLOWUP_2,
+        LeadStatus.REPLIED, LeadStatus.COLD,
+    ]
     qualified_leads = db.query(Lead).filter(
         Lead.campaign_id == campaign_id,
-        Lead.status == LeadStatus.QUALIFIED
+        Lead.status.in_(qualified_or_later)
     ).count()
 
     disqualified_leads = db.query(Lead).filter(
@@ -140,9 +145,7 @@ def get_campaign_dashboard(campaign_id: int, db: Session = Depends(get_db)):
         Lead.status == LeadStatus.COLD
     ).count()
 
-    # Cumulative count of drafts ever generated for this campaign — unlike a
-    # snapshot of leads currently sitting in EMAIL_GENERATED, this doesn't
-    # decrease as leads progress to SENT.
+    # Cumulative count of drafts ever generated for this campaign
     emails_generated = (
         db.query(EmailDraft)
         .join(Lead, EmailDraft.lead_id == Lead.id)
@@ -155,10 +158,13 @@ def get_campaign_dashboard(campaign_id: int, db: Session = Depends(get_db)):
         Lead.status == LeadStatus.WAITING_APPROVAL
     ).count()
 
-    research_complete = db.query(Lead).filter(
-        Lead.campaign_id == campaign_id,
-        Lead.status == LeadStatus.RESEARCH_COMPLETE
-    ).count()
+    # Cumulative count of researched leads ever completed
+    research_complete = (
+        db.query(LeadResearch)
+        .join(Lead, LeadResearch.lead_id == Lead.id)
+        .filter(Lead.campaign_id == campaign_id)
+        .count()
+    )
 
     return {
         "campaign_id": campaign.id,
@@ -240,8 +246,6 @@ def get_campaign_leads_summary(campaign_id: int, db: Session = Depends(get_db)):
     if not campaign:
         raise HTTPException(status_code=404, detail="Campaign not found")
 
-    leads = db.query(Lead).filter(Lead.campaign_id == campaign_id).all()
-
     summary = {
         "found": 0,
         "email_searching": 0,
@@ -258,14 +262,17 @@ def get_campaign_leads_summary(campaign_id: int, db: Session = Depends(get_db)):
         "followup_1": 0,
         "followup_2": 0,
         "replied": 0,
-        "cold": 0
+        "cold": 0,
     }
 
+    status_counts = db.query(Lead.status, sql_func.count(Lead.id)).filter(
+        Lead.campaign_id == campaign_id
+    ).group_by(Lead.status).all()
 
-    for lead in leads:
-        status_key = lead.status.value.lower() if hasattr(lead.status, "value") else str(lead.status).lower()
+    for status_enum, count in status_counts:
+        status_key = status_enum.value.lower() if hasattr(status_enum, "value") else str(status_enum).lower()
         if status_key in summary:
-            summary[status_key] += 1
+            summary[status_key] = count
 
     return summary
 

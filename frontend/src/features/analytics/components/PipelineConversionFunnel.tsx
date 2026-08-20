@@ -41,13 +41,13 @@ export const PipelineConversionFunnel: React.FC<PipelineConversionFunnelProps> =
   // - "Researched" maps to research_done (97) / research_complete
   // - "Qualified" maps to qualified (57) / qualified_leads
   // - "Drafts Ready" maps to drafts (26) / emails_generated
-  const scrapedCount = (dashboard as any)?.total_prospects ?? dashboard?.total_leads ?? (summary as any)?.total_prospects ?? (summary as any)?.found ?? progress?.leads_found ?? 0;
-  const emailsFoundCount = (summary as any)?.emails_discovered ?? (dashboard as any)?.emails_discovered ?? (dashboard as any)?.emails_found ?? (summary as any)?.emails_found ?? progress?.emails_found ?? (summary as any)?.email_found ?? 0;
-  const researchedCount = (summary as any)?.research_done ?? (dashboard as any)?.research_done ?? dashboard?.research_complete ?? progress?.research_done ?? (summary as any)?.research_complete ?? 0;
-  const qualifiedCount = (summary as any)?.qualified ?? (dashboard as any)?.qualified ?? dashboard?.qualified_leads ?? progress?.qualified_done ?? 0;
-  const draftsCount = (summary as any)?.drafts ?? (dashboard as any)?.drafts ?? dashboard?.emails_generated ?? progress?.emails_written ?? (summary as any)?.email_generated ?? (summary as any)?.waiting_approval ?? 0;
-  const sentCount = dashboard?.emails_sent ?? (summary as any)?.sent ?? 0;
-  const repliedCount = dashboard?.replies ?? (summary as any)?.replied ?? 0;
+  const scrapedCount = progress?.leads_found ?? dashboard?.total_leads ?? 0;
+  const emailsFoundCount = progress?.emails_found ?? ((dashboard?.total_leads ?? 0) - (summary?.email_not_found ?? 0));
+  const researchedCount = progress?.research_done ?? dashboard?.research_complete ?? 0;
+  const qualifiedCount = progress?.qualified_done ?? dashboard?.qualified_leads ?? 0;
+  const draftsCount = progress?.emails_written ?? dashboard?.emails_generated ?? 0;
+  const sentCount = dashboard?.emails_sent ?? summary?.sent ?? 0;
+  const repliedCount = dashboard?.replies ?? summary?.replied ?? 0;
 
   const stages = [
     { stage: 'Scraped', count: scrapedCount },

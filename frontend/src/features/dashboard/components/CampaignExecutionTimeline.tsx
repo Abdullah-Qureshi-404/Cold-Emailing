@@ -2,6 +2,9 @@ import React from 'react';
 import { Layers, CheckCircle2, ArrowRight } from 'lucide-react';
 import { useValidatedActiveCampaignId } from '../../../hooks/useValidatedActiveCampaignId';
 import { useLeadSummary } from '../../leads/hooks/useLeadSummary';
+import { useCampaignDashboard } from '../hooks/useCampaignDashboard';
+import { useQuery } from '@tanstack/react-query';
+import { campaignsApi } from '../../../services/api/campaigns';
 
 interface CampaignExecutionTimelineProps {
   /** Scopes this component to a specific campaign (Campaign Workspace). Falls back to the global active campaign. */
@@ -11,15 +14,21 @@ interface CampaignExecutionTimelineProps {
 export const CampaignExecutionTimeline: React.FC<CampaignExecutionTimelineProps> = ({ campaignId }) => {
   const activeCampaignId = useValidatedActiveCampaignId(campaignId);
   const { data: summary, isLoading, isError } = useLeadSummary(activeCampaignId);
+  const { data: dashboard } = useCampaignDashboard(activeCampaignId);
+  const { data: progress } = useQuery({
+    queryKey: ['pipeline-progress', activeCampaignId],
+    queryFn: () => campaignsApi.getPipelineProgress(activeCampaignId!),
+    enabled: !!activeCampaignId && activeCampaignId > 0,
+  });
 
   const pipelineStages = [
-    { key: 'found', label: '1. Scraped / Imported', count: summary?.found ?? 0, color: 'text-zinc-400' },
-    { key: 'email_found', label: '2. Emails Discovered', count: summary?.email_found ?? 0, color: 'text-zinc-300' },
-    { key: 'research_complete', label: '3. AI Research Done', count: summary?.research_complete ?? 0, color: 'text-purple-400' },
-    { key: 'qualified', label: '4. Qualified ICP Fit', count: summary?.qualified ?? 0, color: 'text-purple-300' },
-    { key: 'waiting_approval', label: '5. Drafts Pending Approval', count: summary?.waiting_approval ?? 0, color: 'text-amber-400' },
-    { key: 'sent', label: '6. Emails Sent (Gmail API)', count: summary?.sent ?? 0, color: 'text-blue-400' },
-    { key: 'replied', label: '7. Positive Replies', count: summary?.replied ?? 0, color: 'text-emerald-400' },
+    { key: 'found', label: '1. Scraped / Imported', count: progress?.leads_found ?? dashboard?.total_leads ?? 0, color: 'text-zinc-300' },
+    { key: 'email_found', label: '2. Emails Discovered', count: progress?.emails_found ?? ((dashboard?.total_leads ?? 0) - (summary?.email_not_found ?? 0)), color: 'text-zinc-200' },
+    { key: 'research_complete', label: '3. AI Research Done', count: progress?.research_done ?? dashboard?.research_complete ?? 0, color: 'text-purple-400' },
+    { key: 'qualified', label: '4. Qualified ICP Fit', count: progress?.qualified_done ?? dashboard?.qualified_leads ?? 0, color: 'text-purple-300' },
+    { key: 'waiting_approval', label: '5. Drafts Ready', count: progress?.emails_written ?? dashboard?.emails_generated ?? 0, color: 'text-amber-400' },
+    { key: 'sent', label: '6. Emails Sent (Gmail API)', count: dashboard?.emails_sent ?? summary?.sent ?? 0, color: 'text-blue-400' },
+    { key: 'replied', label: '7. Positive Replies', count: dashboard?.replies ?? summary?.replied ?? 0, color: 'text-emerald-400' },
   ];
 
   return (

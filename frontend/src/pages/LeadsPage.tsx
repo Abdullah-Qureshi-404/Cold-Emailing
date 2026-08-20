@@ -14,7 +14,7 @@ const STAGE_OPTIONS = [
   { value: 'researched', label: 'Researched' },
   { value: 'qualified', label: 'Qualified' },
   { value: 'disqualified', label: 'Disqualified' },
-  { value: 'email_generated', label: 'Drafted' },
+  { value: 'drafted', label: 'Drafted' },
   { value: 'sent', label: 'Sent' },
   { value: 'replied', label: 'Replied' },
   { value: 'cold', label: 'Cold' },
@@ -23,9 +23,18 @@ const STAGE_OPTIONS = [
 export const LeadsPage: React.FC = () => {
   const [selectedCampaignId, setSelectedCampaignId] = useState<number | null>(null)
   const [search, setSearch] = useState('')
+  const [debouncedSearch, setDebouncedSearch] = useState('')
   const [stage, setStage] = useState('')
   const [page, setPage] = useState(1)
   const pageSize = 25
+
+  // 300ms debounce for search input to prevent firing query per keystroke
+  useEffect(() => {
+    const handler = setTimeout(() => {
+      setDebouncedSearch(search)
+    }, 300)
+    return () => clearTimeout(handler)
+  }, [search])
 
   // Fetch all campaigns
   const { data: campaigns, isLoading: campaignsLoading } = useQuery({
@@ -43,18 +52,18 @@ export const LeadsPage: React.FC = () => {
   // Reset pagination on filter change
   useEffect(() => {
     setPage(1)
-  }, [search, stage, selectedCampaignId])
+  }, [debouncedSearch, stage, selectedCampaignId])
 
   const campaignId = selectedCampaignId ?? (campaigns?.[0]?.id || 0)
   const activeCampaign = campaigns?.find((c) => c.id === campaignId)
 
   // Fetch leads for the selected campaign
   const { data: leadsData, isLoading: leadsLoading } = useQuery({
-    queryKey: ['leads-list', campaignId, stage, search, page],
+    queryKey: ['leads-list', campaignId, stage, debouncedSearch, page],
     queryFn: () =>
       leadsApi.getLeads(campaignId, {
         stage: stage || undefined,
-        search: search || undefined,
+        search: debouncedSearch || undefined,
         page,
         pageSize,
       }),

@@ -288,12 +288,12 @@ export const CampaignPage: React.FC = () => {
                 <BarChart
                   layout="vertical"
                   data={[
-                    { name: 'Found', value: (dashboard as any)?.total_prospects ?? dashboard?.total_leads ?? (summary as any)?.total_prospects ?? (summary as any)?.found ?? progress?.leads_found ?? 0 },
-                    { name: 'Emails', value: (summary as any)?.emails_discovered ?? (dashboard as any)?.emails_discovered ?? (dashboard as any)?.emails_found ?? (summary as any)?.emails_found ?? progress?.emails_found ?? (summary as any)?.email_found ?? 0 },
-                    { name: 'Researched', value: (summary as any)?.research_done ?? (dashboard as any)?.research_done ?? dashboard?.research_complete ?? progress?.research_done ?? (summary as any)?.research_complete ?? 0 },
-                    { name: 'Qualified', value: (summary as any)?.qualified ?? (dashboard as any)?.qualified ?? dashboard?.qualified_leads ?? progress?.qualified_done ?? 0 },
-                    { name: 'Drafted', value: (summary as any)?.drafts ?? (dashboard as any)?.drafts ?? dashboard?.emails_generated ?? progress?.emails_written ?? (summary as any)?.email_generated ?? (summary as any)?.waiting_approval ?? 0 },
-                    { name: 'Sent', value: dashboard?.emails_sent ?? (summary as any)?.sent ?? 0 },
+                    { name: 'Found', value: progress?.leads_found ?? dashboard?.total_leads ?? 0 },
+                    { name: 'Emails', value: progress?.emails_found ?? ((dashboard?.total_leads ?? 0) - (summary?.email_not_found ?? 0)) },
+                    { name: 'Researched', value: progress?.research_done ?? dashboard?.research_complete ?? 0 },
+                    { name: 'Qualified', value: progress?.qualified_done ?? dashboard?.qualified_leads ?? 0 },
+                    { name: 'Drafted', value: progress?.emails_written ?? dashboard?.emails_generated ?? 0 },
+                    { name: 'Sent', value: dashboard?.emails_sent ?? summary?.sent ?? 0 },
                   ]}
                   margin={{ top: 10, right: 40, left: 30, bottom: 10 }}
                 >
