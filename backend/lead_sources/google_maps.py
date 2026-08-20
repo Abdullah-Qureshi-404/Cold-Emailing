@@ -13,16 +13,74 @@ SCRAPER_URL = os.getenv("GOOGLE_MAPS_SCRAPER_URL", "http://google-maps-scraper.r
 POLL_INTERVAL_SECONDS = 3
 MAX_POLL_DURATION_SECONDS = 180  # 3 minutes
 
+# Pre-defined coordinates for popular metropolitan areas
+CITY_COORDINATES = {
+    "toronto": ("43.6532", "-79.3832"),
+    "vancouver": ("49.2827", "-123.1207"),
+    "montreal": ("45.5017", "-73.5673"),
+    "calgary": ("51.0447", "-114.0719"),
+    "ottawa": ("45.4215", "-75.6972"),
+    "new york": ("40.7128", "-74.0060"),
+    "london": ("51.5074", "-0.1278"),
+    "san francisco": ("37.7749", "-122.4194"),
+    "austin": ("30.2672", "-97.7431"),
+    "los angeles": ("34.0522", "-118.2437"),
+    "chicago": ("41.8781", "-87.6298"),
+    "seattle": ("47.6062", "-122.3321"),
+    "miami": ("25.7617", "-80.1918"),
+    "sydney": ("-33.8688", "151.2093"),
+    "berlin": ("52.5200", "13.4050"),
+    "paris": ("48.8566", "2.3522"),
+}
 
-def _create_job(full_query: str, campaign_id: int) -> str:
+
+def _resolve_geo_coordinates(location: str) -> tuple[str, str, int]:
+    """
+    Resolves latitude, longitude, and map zoom level for a given location string.
+    """
+    if not location:
+        return "43.6532", "-79.3832", 12
+
+    loc_clean = location.strip().lower()
+    for city, coords in CITY_COORDINATES.items():
+        if city in loc_clean:
+            return coords[0], coords[1], 12
+
+    # Geocode dynamically via OpenStreetMap Nominatim
+    try:
+        r = requests.get(
+            "https://nominatim.openstreetmap.org/search",
+            params={"q": location, "format": "json", "limit": 1},
+            headers={"User-Agent": "ColdEmailPlatform/1.0"},
+            timeout=3,
+        )
+        if r.ok:
+            results = r.json()
+            if results and isinstance(results, list):
+                lat = str(results[0].get("lat", "43.6532"))
+                lon = str(results[0].get("lon", "-79.3832"))
+                return lat, lon, 12
+    except Exception as e:
+        logger.warning("Geocoding lookup failed for '%s': %s", location, e)
+
+    # Default fallback to Toronto metropolitan area
+    return "43.6532", "-79.3832", 12
+
+
+def _create_job(full_query: str, location: str, campaign_id: int) -> str:
     """
     Submits a new scraping job to the Google Maps scraper service.
     Returns the job_id.
     """
     endpoint = f"{SCRAPER_URL}/api/v1/jobs"
+    lat, lon, zoom = _resolve_geo_coordinates(location)
+
     payload = {
         "name": f"campaign-{campaign_id}-{int(time.time())}",
         "keywords": [full_query],
+        "lat": lat,
+        "lon": lon,
+        "zoom": zoom,
         "depth": 1,
         "max_time": 180,
         "fast_mode": True,
@@ -136,7 +194,7 @@ def _fetch_job_results(job_id: str) -> list[dict]:
 def scrape_google_maps(query: str, location: str, campaign_id: int) -> list[dict]:
     """
     Orchestrates Google Maps scraping through the standalone scraper service:
-    1. Submits the search query.
+    1. Submits the search query with resolved geo coordinates.
     2. Polls for job completion.
     3. Fetches and normalizes business lead rows.
     """
@@ -145,9 +203,9 @@ def scrape_google_maps(query: str, location: str, campaign_id: int) -> list[dict
         logger.warning("Empty search query provided for Google Maps scraping.")
         return []
 
-    logger.info("Starting Google Maps scrape for campaign %d: '%s'", campaign_id, full_query)
+    logger.info("Starting Google Maps scrape for campaign %d: '%s' (location='%s')", campaign_id, full_query, location)
 
-    job_id = _create_job(full_query, campaign_id)
+    job_id = _create_job(full_query, location, campaign_id)
     _poll_job_completion(job_id)
     raw_rows = _fetch_job_results(job_id)
 
