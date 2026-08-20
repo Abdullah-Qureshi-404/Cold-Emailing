@@ -99,3 +99,27 @@ class LeadsSummary(BaseModel):
     followup_2: int
     replied: int
     cold: int
+
+
+class CampaignProcessingProgress(BaseModel):
+    total: int = 0
+    finding_leads: int = 0
+    finding_emails: int = 0
+    researching: int = 0
+    qualifying: int = 0
+    generating_emails: int = 0
+    qualified: int = 0
+    email_generated: int = 0
+    disqualified: int = 0
+    sent: int = 0
+    email_not_found: int = 0
+
+
+class CampaignProcessingStatus(BaseModel):
+    campaign_id: int
+    campaign_status: str
+    processing_stage: str
+    processing_label: str
+    is_processing: bool
+    progress: CampaignProcessingProgress
+

@@ -6,6 +6,7 @@ from database import SessionLocal
 from models.lead import Lead, LeadStatus
 from agents.research_agent import research_lead
 from tasks.errors import safe_task_error
+from services.redis_lock import acquire_stage_lock, release_stage_lock
 
 logger = logging.getLogger(__name__)
 
@@ -34,9 +35,20 @@ def _research_one(lead_id: int) -> bool:
 @celery_app.task(bind=True)
 def process_lead_research_task(self, campaign_id: int) -> dict:
     """
-    Background Celery task that finds all EMAIL_FOUND leads for a campaign
+    Background Celery task that finds all EMAIL_FOUND / RESEARCH_PENDING leads for a campaign
     and runs the AI research pipeline on them concurrently.
+    Protected by distributed lock to prevent duplicate concurrent runs.
     """
+    if not acquire_stage_lock(campaign_id, "research", ttl_seconds=300):
+        logger.info("Research task skipped for campaign %d: stage is already locked/running", campaign_id)
+        return {
+            "status": "skipped",
+            "message": "Research task already running for this campaign",
+            "processed": 0,
+            "researched": 0,
+            "failed": 0
+        }
+
     logger.info("Research task started for campaign %d", campaign_id)
     db = SessionLocal()
     processed_count = 0
@@ -47,16 +59,12 @@ def process_lead_research_task(self, campaign_id: int) -> dict:
     try:
         leads = db.query(Lead).filter(
             Lead.campaign_id == campaign_id,
-            # Include RESEARCH_PENDING too: a lead lands there the instant
-            # research starts, and previously stayed stuck there forever if
-            # that attempt failed validation (no way to retry it). Re-running
-            # this task now retries those alongside fresh EMAIL_FOUND leads.
             Lead.status.in_([LeadStatus.EMAIL_FOUND, LeadStatus.RESEARCH_PENDING])
         ).all()
         lead_ids = [l.id for l in leads]
 
         if not lead_ids:
-            logger.info("Research task: no EMAIL_FOUND leads found for campaign %d", campaign_id)
+            logger.info("Research task: no EMAIL_FOUND / RESEARCH_PENDING leads found for campaign %d", campaign_id)
             return {
                 "status": "success",
                 "message": "No EMAIL_FOUND leads to research",
@@ -108,3 +116,4 @@ def process_lead_research_task(self, campaign_id: int) -> dict:
         }
     finally:
         db.close()
+        release_stage_lock(campaign_id, "research")

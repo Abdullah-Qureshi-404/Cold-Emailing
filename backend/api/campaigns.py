@@ -11,6 +11,7 @@ from pydantic import BaseModel
 from schemas.campaign import (
     CampaignRead, CampaignActionResponse, DashboardMetrics, LeadsSummary,
     PipelineProgress, CampaignPlanRequest, CampaignPlan,
+    CampaignProcessingStatus, CampaignProcessingProgress,
 )
 from services.groq_service import generate_campaign_plan
 
@@ -319,3 +320,137 @@ def resume_pipeline(campaign_id: int, db: Session = Depends(get_db)):
         "dispatched": dispatched,
         "pending_counts": counts,
     }
+
+
+@router.get("/{campaign_id}/processing-status", response_model=CampaignProcessingStatus)
+def get_campaign_processing_status(campaign_id: int, db: Session = Depends(get_db)):
+    """
+    Returns the real-time, deterministic pipeline processing stage of a campaign
+    derived directly from persistent PostgreSQL database state.
+    """
+    campaign = db.query(Campaign).filter(Campaign.id == campaign_id).first()
+    if not campaign:
+        raise HTTPException(status_code=404, detail="Campaign not found")
+
+    status_str = campaign.status.value if hasattr(campaign.status, "value") else str(campaign.status)
+    total_leads = db.query(Lead).filter(Lead.campaign_id == campaign_id).count()
+
+    # Query counts across pipeline stages
+    finding_emails_count = db.query(Lead).filter(
+        Lead.campaign_id == campaign_id,
+        Lead.status.in_([LeadStatus.FOUND, LeadStatus.EMAIL_SEARCHING])
+    ).count()
+
+    researching_count = db.query(Lead).filter(
+        Lead.campaign_id == campaign_id,
+        Lead.status.in_([LeadStatus.EMAIL_FOUND, LeadStatus.RESEARCH_PENDING])
+    ).count()
+
+    qualifying_count = db.query(Lead).filter(
+        Lead.campaign_id == campaign_id,
+        Lead.status == LeadStatus.RESEARCH_COMPLETE,
+        Lead.qualification_reason.is_(None)
+    ).count()
+
+    # Qualified leads that do not yet have an EmailDraft
+    drafted_lead_ids = db.query(EmailDraft.lead_id).filter(
+        EmailDraft.lead_id == Lead.id,
+        Lead.campaign_id == campaign_id
+    )
+    generating_emails_count = db.query(Lead).filter(
+        Lead.campaign_id == campaign_id,
+        Lead.status == LeadStatus.QUALIFIED,
+        ~Lead.id.in_(drafted_lead_ids)
+    ).count()
+
+    qualified_count = db.query(Lead).filter(
+        Lead.campaign_id == campaign_id,
+        Lead.status == LeadStatus.QUALIFIED
+    ).count()
+
+    email_generated_count = db.query(Lead).filter(
+        Lead.campaign_id == campaign_id,
+        Lead.status.in_([LeadStatus.EMAIL_GENERATED, LeadStatus.WAITING_APPROVAL])
+    ).count()
+
+    disqualified_count = db.query(Lead).filter(
+        Lead.campaign_id == campaign_id,
+        Lead.status == LeadStatus.DISQUALIFIED
+    ).count()
+
+    sent_count = db.query(Lead).filter(
+        Lead.campaign_id == campaign_id,
+        Lead.status.in_([LeadStatus.SENT, LeadStatus.FOLLOWUP_1, LeadStatus.FOLLOWUP_2, LeadStatus.REPLIED, LeadStatus.COLD])
+    ).count()
+
+    email_not_found_count = db.query(Lead).filter(
+        Lead.campaign_id == campaign_id,
+        Lead.status == LeadStatus.EMAIL_NOT_FOUND
+    ).count()
+
+    progress = CampaignProcessingProgress(
+        total=total_leads,
+        finding_leads=0 if total_leads > 0 else 1,
+        finding_emails=finding_emails_count,
+        researching=researching_count,
+        qualifying=qualifying_count,
+        generating_emails=generating_emails_count,
+        qualified=qualified_count,
+        email_generated=email_generated_count,
+        disqualified=disqualified_count,
+        sent=sent_count,
+        email_not_found=email_not_found_count
+    )
+
+    # Determine processing stage deterministically
+    if status_str != "active":
+        return CampaignProcessingStatus(
+            campaign_id=campaign_id,
+            campaign_status=status_str,
+            processing_stage="idle",
+            processing_label="Idle",
+            is_processing=False,
+            progress=progress
+        )
+
+    if total_leads == 0:
+        return CampaignProcessingStatus(
+            campaign_id=campaign_id,
+            campaign_status=status_str,
+            processing_stage="finding_leads",
+            processing_label="Finding Leads",
+            is_processing=True,
+            progress=progress
+        )
+
+    # Earliest active stage priority
+    if finding_emails_count > 0:
+        stage = "finding_emails"
+        label = "Finding Emails"
+        is_proc = True
+    elif researching_count > 0:
+        stage = "researching_leads"
+        label = "Researching Leads"
+        is_proc = True
+    elif qualifying_count > 0:
+        stage = "qualifying_leads"
+        label = "Qualifying Leads"
+        is_proc = True
+    elif generating_emails_count > 0:
+        stage = "generating_emails"
+        label = "Generating Emails"
+        is_proc = True
+    else:
+        # All leads have reached terminal states
+        stage = "finished"
+        label = "Finished"
+        is_proc = False
+
+    return CampaignProcessingStatus(
+        campaign_id=campaign_id,
+        campaign_status=status_str,
+        processing_stage=stage,
+        processing_label=label,
+        is_processing=is_proc,
+        progress=progress
+    )

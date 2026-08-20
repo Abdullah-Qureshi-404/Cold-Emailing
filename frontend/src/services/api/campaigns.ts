@@ -6,6 +6,7 @@ import type {
   LeadSummaryBreakdown,
   PipelineProgress,
   CampaignPlan,
+  CampaignProcessingStatus,
 } from '../../types/api';
 
 export const campaignsApi = {
@@ -54,8 +55,14 @@ export const campaignsApi = {
     return response.data;
   },
 
+  getProcessingStatus: async (campaignId: number): Promise<CampaignProcessingStatus> => {
+    const response = await apiClient.get<CampaignProcessingStatus>(`/campaigns/${campaignId}/processing-status`);
+    return response.data;
+  },
+
   resumePipeline: async (campaignId: number): Promise<{ message: string; dispatched: string[] }> => {
     const response = await apiClient.post(`/campaigns/${campaignId}/resume-pipeline`);
     return response.data;
   },
 };
+

@@ -5,6 +5,7 @@ from models.lead import Lead, LeadStatus
 from services.email_finder import find_email_from_website
 from services.email_verifier import verify_email_domain
 from tasks.errors import safe_task_error
+from services.redis_lock import acquire_stage_lock, release_stage_lock
 
 logger = logging.getLogger(__name__)
 
@@ -14,7 +15,17 @@ def process_email_discovery_task(campaign_id: int) -> dict:
     """
     Background Celery task that processes leads with status FOUND for a given campaign.
     Updates status: FOUND -> EMAIL_SEARCHING -> EMAIL_FOUND or EMAIL_NOT_FOUND.
+    Protected by distributed lock to prevent duplicate concurrent runs.
     """
+    if not acquire_stage_lock(campaign_id, "email_discovery", ttl_seconds=180):
+        logger.info("Email discovery task skipped for campaign %d: stage is already locked/running", campaign_id)
+        return {
+            "status": "skipped",
+            "message": "Email discovery task already running for this campaign",
+            "processed": 0,
+            "emails_found": 0
+        }
+
     logger.info("Email discovery task started for campaign %d", campaign_id)
     db = SessionLocal()
     processed_count = 0
@@ -81,3 +92,4 @@ def process_email_discovery_task(campaign_id: int) -> dict:
         }
     finally:
         db.close()
+        release_stage_lock(campaign_id, "email_discovery")

@@ -84,6 +84,7 @@ export const CampaignPage: React.FC = () => {
     queryClient.invalidateQueries({ queryKey: ['email-drafts', campaignId] })
     queryClient.invalidateQueries({ queryKey: ['leads-list', campaignId] })
     queryClient.invalidateQueries({ queryKey: ['pipeline-progress', campaignId] })
+    queryClient.invalidateQueries({ queryKey: ['campaign-processing-status', campaignId] })
   }
 
   // Poll every running task every 2s. While any run, also refresh the lead
@@ -149,6 +150,16 @@ export const CampaignPage: React.FC = () => {
     queryKey: ['email-drafts', campaignId],
     queryFn: () => emailsApi.getEmailDrafts(campaignId),
     enabled: !!campaignId,
+  })
+
+  const { data: processingStatus } = useQuery({
+    queryKey: ['campaign-processing-status', campaignId],
+    queryFn: () => campaignsApi.getProcessingStatus(campaignId),
+    enabled: !!campaignId,
+    refetchInterval: (query) => {
+      const data = query.state.data
+      return data?.is_processing ? 3000 : 8000
+    },
   })
 
   const anyTaskRunning = activeTasks.length > 0
@@ -223,16 +234,38 @@ export const CampaignPage: React.FC = () => {
             <h1 className="text-2xl font-bold tracking-tight text-white sm:text-3xl">{campaign.name}</h1>
             <p className="mt-1 text-sm text-zinc-400">
               {campaign.niche} · {campaign.target_location} ·{' '}
-              <span className="font-semibold text-violet-300">{dashboard?.total_leads ?? 0} leads total</span>
+              <span className="font-semibold text-violet-300">
+                {dashboard?.total_leads ?? processingStatus?.progress?.total ?? 0} leads total
+              </span>
             </p>
           </div>
-          <span className={`self-start sm:self-auto rounded-full px-3 py-1 text-xs font-bold uppercase tracking-wider ${
-            campaign.status === 'active' 
-              ? 'bg-emerald-500/15 text-emerald-400 border border-emerald-500/30 shadow-[0_0_12px_rgba(16,185,129,0.3)]' 
-              : 'bg-zinc-500/15 text-zinc-400 border border-zinc-500/20'
-          }`}>
-            {campaign.status}
-          </span>
+          <div className="flex items-center gap-2.5 self-start sm:self-auto">
+            <div
+              title={
+                processingStatus?.progress
+                  ? `Pipeline Breakdown:\n• Finding Emails: ${processingStatus.progress.finding_emails}\n• Researching: ${processingStatus.progress.researching}\n• Qualifying: ${processingStatus.progress.qualifying}\n• Generating Drafts: ${processingStatus.progress.generating_emails}\n• Qualified: ${processingStatus.progress.qualified}\n• Drafted: ${processingStatus.progress.email_generated}\n• Disqualified: ${processingStatus.progress.disqualified}\n• Sent: ${processingStatus.progress.sent}\n• No Email: ${processingStatus.progress.email_not_found}`
+                  : 'Campaign pipeline processing status'
+              }
+              className={`group relative cursor-help rounded-full px-3.5 py-1 text-xs font-bold uppercase tracking-wider border transition-all ${
+                campaign.status !== 'active'
+                  ? 'bg-zinc-500/15 text-zinc-400 border-zinc-500/20'
+                  : processingStatus?.processing_stage === 'finished'
+                  ? 'bg-emerald-500/15 text-emerald-300 border-emerald-500/30 shadow-[0_0_12px_rgba(16,185,129,0.25)]'
+                  : processingStatus?.processing_stage === 'error'
+                  ? 'bg-rose-500/15 text-rose-300 border-rose-500/30'
+                  : 'bg-violet-500/15 text-violet-200 border-violet-500/35 shadow-[0_0_14px_rgba(139,92,246,0.3)]'
+              }`}
+            >
+              <span className="inline-flex items-center gap-1.5">
+                {campaign.status === 'active' && processingStatus?.is_processing && (
+                  <span className="h-2 w-2 rounded-full bg-violet-400 animate-pulse" />
+                )}
+                {campaign.status === 'active'
+                  ? `ACTIVE · ${processingStatus?.processing_label || 'Processing'}`
+                  : (campaign.status?.toUpperCase() || 'IDLE')}
+              </span>
+            </div>
+          </div>
         </div>
 
         {/* Progress Stepper at top */}

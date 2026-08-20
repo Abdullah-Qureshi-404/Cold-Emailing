@@ -34,8 +34,15 @@ celery_app.conf.update(
         "tasks.research_tasks",
         "tasks.qualification_tasks",
         "tasks.email_sender_tasks",
-        "tasks.followup_tasks"
-    ]
+        "tasks.followup_tasks",
+        "tasks.reconciler"
+    ],
+    beat_schedule={
+        "reconcile-campaign-pipelines-every-30s": {
+            "task": "tasks.reconciler.reconcile_campaigns_task",
+            "schedule": 30.0,
+        }
+    }
 )
 
 # Import task modules explicitly so tasks are registered immediately
@@ -45,3 +52,4 @@ import tasks.research_tasks
 import tasks.qualification_tasks
 import tasks.email_sender_tasks
 import tasks.followup_tasks
+import tasks.reconciler

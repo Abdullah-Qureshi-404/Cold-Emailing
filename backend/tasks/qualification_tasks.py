@@ -4,9 +4,11 @@ from concurrent.futures import ThreadPoolExecutor, as_completed
 from celery_app import celery_app
 from database import SessionLocal
 from models.lead import Lead, LeadStatus
+from models.email_draft import EmailDraft
 from agents.qualification_agent import qualify_lead
 from agents.email_writer_agent import write_email_for_lead
 from tasks.errors import safe_task_error
+from services.redis_lock import acquire_stage_lock, release_stage_lock
 
 logger = logging.getLogger(__name__)
 
@@ -34,8 +36,20 @@ def _write_one(lead_id: int) -> tuple[bool, str | None]:
 def process_qualification_task(campaign_id: int) -> dict:
     """
     Background Celery task that finds all RESEARCH_COMPLETE leads for a campaign
-    and runs qualification logic on each one individually.
+    (that have not yet been evaluated) and runs qualification logic on each one individually.
+    Protected by distributed lock to prevent duplicate concurrent runs.
     """
+    if not acquire_stage_lock(campaign_id, "qualification", ttl_seconds=180):
+        logger.info("Qualification task skipped for campaign %d: stage is already locked/running", campaign_id)
+        return {
+            "status": "skipped",
+            "message": "Qualification task already running for this campaign",
+            "processed": 0,
+            "qualified": 0,
+            "disqualified": 0,
+            "failed": 0
+        }
+
     logger.info("Qualification task started for campaign %d", campaign_id)
     db = SessionLocal()
     processed_count = 0
@@ -46,11 +60,12 @@ def process_qualification_task(campaign_id: int) -> dict:
     try:
         leads = db.query(Lead).filter(
             Lead.campaign_id == campaign_id,
-            Lead.status == LeadStatus.RESEARCH_COMPLETE
+            Lead.status == LeadStatus.RESEARCH_COMPLETE,
+            Lead.qualification_reason.is_(None)
         ).all()
 
         if not leads:
-            logger.info("Qualification task: no RESEARCH_COMPLETE leads found for campaign %d", campaign_id)
+            logger.info("Qualification task: no un-evaluated RESEARCH_COMPLETE leads found for campaign %d", campaign_id)
             return {
                 "status": "success",
                 "message": "No RESEARCH_COMPLETE leads to qualify",
@@ -98,14 +113,27 @@ def process_qualification_task(campaign_id: int) -> dict:
         }
     finally:
         db.close()
+        release_stage_lock(campaign_id, "qualification")
 
 
 @celery_app.task(bind=True)
 def process_email_writing_task(self, campaign_id: int) -> dict:
     """
-    Background Celery task that finds all QUALIFIED leads for a campaign
+    Background Celery task that finds all QUALIFIED leads without an existing email draft
     and generates personalized cold email drafts for each one individually.
+    Protected by distributed lock to prevent duplicate concurrent runs.
     """
+    if not acquire_stage_lock(campaign_id, "email_writing", ttl_seconds=300):
+        logger.info("Email writing task skipped for campaign %d: stage is already locked/running", campaign_id)
+        return {
+            "status": "skipped",
+            "message": "Email writing task already running for this campaign",
+            "processed": 0,
+            "successful": 0,
+            "failed": 0,
+            "skipped": 0
+        }
+
     logger.info("Email writing task started for campaign %d", campaign_id)
     db = SessionLocal()
     processed_count = 0
@@ -131,7 +159,26 @@ def process_email_writing_task(self, campaign_id: int) -> dict:
                 "skipped": 0
             }
 
-        lead_ids = [l.id for l in leads]
+        # Avoid generating duplicate email drafts if one already exists
+        existing_draft_lead_ids = {
+            row[0] for row in db.query(EmailDraft.lead_id).filter(
+                EmailDraft.lead_id.in_([l.id for l in leads])
+            ).all()
+        }
+
+        lead_ids = [l.id for l in leads if l.id not in existing_draft_lead_ids]
+
+        if not lead_ids:
+            logger.info("Email writing task: all %d QUALIFIED leads already have drafts", len(leads))
+            return {
+                "status": "success",
+                "message": "All qualified leads already have drafts",
+                "processed": 0,
+                "successful": 0,
+                "failed": 0,
+                "skipped": len(leads)
+            }
+
         logger.info("Email writing task: processing %d QUALIFIED leads for campaign %d (concurrency=%d)", len(lead_ids), campaign_id, EMAIL_WRITING_CONCURRENCY)
 
         total = len(lead_ids)
@@ -178,3 +225,4 @@ def process_email_writing_task(self, campaign_id: int) -> dict:
         }
     finally:
         db.close()
+        release_stage_lock(campaign_id, "email_writing")

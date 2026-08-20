@@ -181,3 +181,27 @@ export interface ApproveDraftResponse {
   status: string;
   lead_status: string | null;
 }
+
+export interface CampaignProcessingProgress {
+  total: number;
+  finding_leads: number;
+  finding_emails: number;
+  researching: number;
+  qualifying: number;
+  generating_emails: number;
+  qualified: number;
+  email_generated: number;
+  disqualified: number;
+  sent: number;
+  email_not_found: number;
+}
+
+export interface CampaignProcessingStatus {
+  campaign_id: number;
+  campaign_status: string;
+  processing_stage: string;
+  processing_label: string;
+  is_processing: boolean;
+  progress: CampaignProcessingProgress;
+}
+
