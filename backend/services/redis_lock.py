@@ -18,7 +18,10 @@ def get_redis_client():
     if _redis_client is None:
         try:
             import redis
-            _redis_client = redis.from_url(REDIS_URL, decode_responses=True)
+            url = REDIS_URL
+            if "ssl_cert_reqs=CERT_REQUIRED" in url:
+                url = url.replace("ssl_cert_reqs=CERT_REQUIRED", "ssl_cert_reqs=required")
+            _redis_client = redis.from_url(url, decode_responses=True)
             _redis_client.ping()
         except Exception as e:
             logger.warning("Redis lock client initialization failed (%s); using in-memory fallback lock", e)
