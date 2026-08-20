@@ -121,29 +121,44 @@ def _poll_job_completion(job_id: str) -> dict:
     start_time = time.time()
 
     while time.time() - start_time < MAX_POLL_DURATION_SECONDS:
+        job_data = {}
         try:
             resp = requests.get(endpoint, timeout=10)
-            resp.raise_for_status()
-            job_data = resp.json() if resp.content else {}
-        except requests.exceptions.RequestException as e:
+            if resp.ok and resp.content:
+                job_data = resp.json()
+        except Exception as e:
             logger.warning("Transient error polling job %s: %s", job_id, e)
-            time.sleep(POLL_INTERVAL_SECONDS)
-            continue
 
-        status = (
-            job_data.get("status")
-            or job_data.get("state")
-            or (job_data.get("data") or {}).get("status")
-            or ""
-        ).lower()
+        logger.info("Job %s poll response: %s (elapsed: %.1fs)", job_id, job_data, time.time() - start_time)
 
-        logger.info("Job %s status: %s (elapsed: %.1fs)", job_id, status, time.time() - start_time)
+        # 1. Inspect status/state fields
+        status = ""
+        if isinstance(job_data, dict):
+            status = (
+                job_data.get("status")
+                or job_data.get("state")
+                or (job_data.get("data") or {}).get("status")
+                or (job_data.get("data") or {}).get("state")
+                or ""
+            )
+            if job_data.get("done") is True or job_data.get("is_done") is True or (job_data.get("data") or {}).get("done") is True:
+                return job_data
 
-        if status in ["completed", "success", "done", "finished"]:
+        status_str = str(status).lower()
+        if status_str in ["completed", "success", "done", "finished", "ok"]:
             return job_data
-        elif status in ["failed", "error", "cancelled"]:
+        elif status_str in ["failed", "error", "cancelled"]:
             err_msg = job_data.get("error") or job_data.get("message") or "Unknown scraper error"
             raise RuntimeError(f"Google Maps scraper job {job_id} failed: {err_msg}")
+
+        # 2. Check if results CSV is ready via download endpoint
+        try:
+            dl_check = requests.get(f"{SCRAPER_URL}/api/v1/jobs/{job_id}/download", timeout=5)
+            if dl_check.ok and len(dl_check.text.strip()) > 0:
+                logger.info("Job %s results ready for download (bytes: %d)", job_id, len(dl_check.content))
+                return job_data
+        except Exception:
+            pass
 
         time.sleep(POLL_INTERVAL_SECONDS)
 
