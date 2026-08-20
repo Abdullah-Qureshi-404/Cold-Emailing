@@ -138,9 +138,7 @@ def list_leads(
         ))
     return items
 
-# backend/api/leads.py -> backend/api -> backend -> repo root
-REPO_ROOT = Path(__file__).resolve().parents[2]
-DEFAULT_FREE_OUTBOUND_CSV = REPO_ROOT / "free_outbound_agent" / "leads.csv"
+from lead_sources.free_outbound import resolve_free_outbound_csv_path
 
 
 @router.post("/scrape/{campaign_id}", response_model=TaskDispatchResponse)
@@ -211,10 +209,13 @@ def import_free_outbound_csv(
             "campaign_id": campaign_id
         }
 
-    target_path = Path(file_path).resolve() if file_path else DEFAULT_FREE_OUTBOUND_CSV
+    target_path = resolve_free_outbound_csv_path(file_path)
 
-    if not target_path.exists():
-        raise HTTPException(status_code=404, detail=f"CSV file not found at {target_path}")
+    if not target_path or not target_path.exists():
+        raise HTTPException(
+            status_code=404,
+            detail=f"Pre-collected leads CSV file not found (path: {file_path or 'packaged dataset'})."
+        )
 
     # Dispatch import job to Celery task queue
     task = import_free_outbound_task.delay(

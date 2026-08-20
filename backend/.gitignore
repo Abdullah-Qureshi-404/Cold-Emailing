@@ -23,6 +23,7 @@ logs/
 
 # CSV / Excel data (protect lead lists & email data)
 *.csv
+!data/*.csv
 *.xlsx
 *.json
 !package.json
