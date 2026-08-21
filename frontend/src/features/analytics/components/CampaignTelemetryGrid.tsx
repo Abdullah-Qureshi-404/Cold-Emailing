@@ -20,13 +20,12 @@ export const CampaignTelemetryGrid: React.FC<CampaignTelemetryGridProps> = ({ ca
         <div>
           <h3 className="text-xs font-semibold text-zinc-100 uppercase tracking-wider flex items-center gap-2">
             Campaign Performance Telemetry
-            <span className="ai-gradient-text font-mono text-[10px] font-bold">FastAPI Live Data</span>
           </h3>
           <p className="text-[11px] text-zinc-400">
-            GET /campaigns/{activeCampaignId || '{id}'}/dashboard
+            Real-time aggregate conversion metrics and outreach throughput
           </p>
         </div>
-        <span className="text-[10px] font-mono text-purple-400 bg-purple-500/10 px-2.5 py-1 rounded-full border border-purple-500/20">
+        <span className="text-[10px] font-medium text-purple-400 bg-purple-500/10 px-2.5 py-1 rounded-full border border-purple-500/20">
           {activeCampaignId ? `Campaign #${activeCampaignId} Telemetry` : 'Select Campaign'}
         </span>
       </div>

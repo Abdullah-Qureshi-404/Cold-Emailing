@@ -46,8 +46,8 @@ export const AIDraftReviewPreview: React.FC<AIDraftReviewPreviewProps> = ({ camp
             <Sparkles className="h-4 w-4 text-purple-400" />
             <h3 className="text-sm font-semibold text-zinc-100">AI Draft Review Queue</h3>
           </div>
-          <span className="text-[11px] font-mono text-purple-400">
-            GET /leads/{activeCampaignId}/email-drafts
+          <span className="text-[11px] font-medium text-purple-400">
+            Campaign #{activeCampaignId}
           </span>
         </div>
         <p className="text-xs text-red-400 font-mono text-center py-6 border border-dashed border-red-500/20 rounded-lg">
@@ -65,8 +65,8 @@ export const AIDraftReviewPreview: React.FC<AIDraftReviewPreviewProps> = ({ camp
             <Sparkles className="h-4 w-4 text-purple-400" />
             <h3 className="text-sm font-semibold text-zinc-100">AI Draft Review Queue</h3>
           </div>
-          <span className="text-[11px] font-mono text-purple-400">
-            GET /leads/{activeCampaignId}/email-drafts
+          <span className="text-[11px] font-medium text-purple-400">
+            Campaign #{activeCampaignId}
           </span>
         </div>
         <p className="text-xs text-zinc-400 font-mono text-center py-6 border border-dashed border-white/10 rounded-lg">
@@ -94,8 +94,8 @@ export const AIDraftReviewPreview: React.FC<AIDraftReviewPreviewProps> = ({ camp
           <Sparkles className="h-4 w-4 text-purple-400" />
           <h3 className="text-sm font-semibold text-zinc-100">AI Draft Review Queue</h3>
         </div>
-        <span className="text-[11px] font-mono text-purple-400">
-          GET /leads/{activeCampaignId}/email-drafts
+        <span className="text-[11px] font-medium text-purple-400 bg-purple-500/10 px-2.5 py-0.5 rounded-full border border-purple-500/20">
+          {drafts.length} Drafts Ready
         </span>
       </div>
 
@@ -148,8 +148,8 @@ export const AIDraftReviewPreview: React.FC<AIDraftReviewPreviewProps> = ({ camp
 
       {/* Action Footer */}
       <div className="flex items-center justify-between pt-1">
-        <span className="text-[10px] font-mono text-zinc-500">
-          PATCH /leads/approve-email/{currentDraft.lead_id}
+        <span className="text-xs text-zinc-400">
+          Review personalized cold email before dispatching
         </span>
         <button
           onClick={handleApprove}

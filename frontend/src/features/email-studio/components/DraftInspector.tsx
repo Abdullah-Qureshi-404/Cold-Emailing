@@ -164,9 +164,9 @@ export const DraftInspector: React.FC<DraftInspectorProps> = ({
 
       {/* Action Footer */}
       <div className="border-t border-white/[0.08] pt-4 flex items-center justify-between gap-3">
-        <div className="text-[10px] font-mono text-zinc-500 flex items-center gap-1 min-w-0">
-          <AlertCircle className="h-3 w-3 shrink-0 text-purple-400" />
-          <span className="truncate">PATCH /leads/draft/{draft.lead_id}</span>
+        <div className="text-xs text-zinc-400 flex items-center gap-1.5 min-w-0">
+          <AlertCircle className="h-3.5 w-3.5 shrink-0 text-purple-400" />
+          <span className="truncate">Edits are saved directly to lead draft</span>
         </div>
 
         <div className="flex shrink-0 items-center gap-2">

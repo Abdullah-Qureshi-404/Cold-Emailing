@@ -68,10 +68,8 @@ export const ScrapeLeadsModal: React.FC<ScrapeLeadsModalProps> = ({
             />
           </div>
 
-          <div className="rounded-lg border border-purple-500/20 bg-purple-950/20 p-3 text-[11px] text-purple-300 font-mono">
-            POST /leads/scrape/&#123;campaign_id&#125;
-            <br />
-            Status: Dispatches async Celery task to scrape Google Maps entries into database (status: FOUND).
+          <div className="rounded-lg border border-purple-500/20 bg-purple-950/20 p-3 text-xs text-purple-200">
+            Searches Google Maps in real-time and imports structured business profiles, addresses, phones, and websites directly into your campaign.
           </div>
 
           <div className="pt-2 flex justify-end gap-3">

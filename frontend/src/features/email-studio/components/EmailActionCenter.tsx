@@ -59,7 +59,7 @@ export const EmailActionCenter: React.FC<EmailActionCenterProps> = ({
             handleAction(
               'write',
               'Generate AI Email Drafts',
-              `POST /leads/write-emails/${activeCampaignId}`,
+              'Writing personalized emails with Groq Llama 3.3...',
               generateDrafts
             )
           }
@@ -80,7 +80,7 @@ export const EmailActionCenter: React.FC<EmailActionCenterProps> = ({
             handleAction(
               'send',
               'Send Approved Emails (Gmail API)',
-              `POST /leads/send-emails/${activeCampaignId}`,
+              'Dispatching approved email drafts via Gmail...',
               sendEmails
             )
           }
@@ -101,7 +101,7 @@ export const EmailActionCenter: React.FC<EmailActionCenterProps> = ({
             handleAction(
               'replies',
               'Scan Gmail Replies',
-              `POST /leads/check-replies/${activeCampaignId}`,
+              'Checking active email threads for replies...',
               checkReplies
             )
           }

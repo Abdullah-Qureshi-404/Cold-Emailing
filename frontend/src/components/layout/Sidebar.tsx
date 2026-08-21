@@ -8,8 +8,6 @@ import {
   Settings,
   ChevronLeft,
   ChevronRight,
-  Cpu,
-  ShieldCheck,
 } from 'lucide-react'
 import { useUIStore } from '../../store/useUIStore'
 import { WorkspaceSwitcher } from './WorkspaceSwitcher'
@@ -69,26 +67,6 @@ export const Sidebar: React.FC = () => {
             )
           })}
         </nav>
-
-        {/* System Status Indicators */}
-        {!isSidebarCollapsed && (
-          <div className="mx-3 mb-3 rounded-xl border border-white/[0.08] bg-[#0a0a0f]/60 backdrop-blur-md p-3 space-y-2">
-            <div className="flex items-center justify-between text-[11px]">
-              <span className="flex items-center gap-1.5 text-zinc-400">
-                <Cpu className="h-3.5 w-3.5 text-violet-400" />
-                Groq AI Latency
-              </span>
-              <span className="font-mono text-violet-300 font-semibold">140ms</span>
-            </div>
-            <div className="flex items-center justify-between text-[11px]">
-              <span className="flex items-center gap-1.5 text-zinc-400">
-                <ShieldCheck className="h-3.5 w-3.5 text-emerald-400" />
-                Warmup Health
-              </span>
-              <span className="font-mono text-emerald-400 font-semibold">99%</span>
-            </div>
-          </div>
-        )}
 
         {/* Collapse Toggle Button */}
         <div className="p-3 border-t border-white/[0.08] flex items-center justify-end">

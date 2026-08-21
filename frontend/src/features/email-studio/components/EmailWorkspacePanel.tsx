@@ -31,18 +31,18 @@ export const EmailWorkspacePanel: React.FC<EmailWorkspacePanelProps> = ({ campai
     if (selectedDraft && selectedDraft.lead_id === leadId) {
       setSelectedDraft((prev) => (prev ? { ...prev, status: 'approved' } : null));
     }
-    notify(`Draft approved for lead #${leadId}`, `PATCH /leads/approve-email/${leadId}`);
+    notify(`Draft approved for lead #${leadId}`, 'Email marked approved and queued');
   };
 
   const handleSave = async (leadId: number, subject: string, body: string) => {
     await saveDraft({ leadId, subject, body });
-    notify(`Draft edits saved for lead #${leadId}`, `PATCH /leads/draft/${leadId}`);
+    notify(`Draft edits saved for lead #${leadId}`, 'Subject and body updated');
   };
 
   const handleGenerateDrafts = async () => {
     try {
       const response = await generateDrafts();
-      notify('Generate AI email drafts', `POST /leads/write-emails/${campaignId}`, response);
+      notify('Generate AI email drafts', 'Synthesizing personalized drafts...', response);
     } catch (err: unknown) {
       const msg = err instanceof Error ? err.message : 'Generation failed';
       alert(`Error writing emails: ${msg}`);

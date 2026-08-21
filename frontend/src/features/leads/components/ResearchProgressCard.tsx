@@ -36,11 +36,10 @@ export const ResearchProgressCard: React.FC<ResearchProgressCardProps> = ({ camp
           </div>
           <div>
             <h3 className="text-xs font-semibold text-zinc-100 flex items-center gap-2">
-              Groq AI Research Intelligence
-              <span className="ai-gradient-text font-mono text-[10px] font-bold">Llama 3.3 Engine</span>
+              AI Research Intelligence
             </h3>
             <p className="text-[11px] text-zinc-400">
-              GET /leads/{activeCampaignId || '{id}'}/research-status
+              Automated web search, enrichment, and company profiling
             </p>
           </div>
         </div>

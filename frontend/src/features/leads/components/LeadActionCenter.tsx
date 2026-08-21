@@ -76,7 +76,7 @@ export const LeadActionCenter: React.FC<LeadActionCenterProps> = ({
       const result = await resetDailyCache();
       onTriggerTask(
         `Daily cache reset (${result.deleted} entries cleared)`,
-        `DELETE /leads/reset-daily-cache/${activeCampaignId}`
+        'Deduplication cache cleared for today'
       );
     } catch (err: unknown) {
       const msg = err instanceof Error ? err.message : 'Reset failed';
@@ -88,7 +88,6 @@ export const LeadActionCenter: React.FC<LeadActionCenterProps> = ({
     {
       id: 'scrape_leads',
       name: 'Scrape Google Maps Leads',
-      endpoint: 'POST /leads/scrape/{campaign_id}',
       icon: Search,
       badge: 'Google Maps Scraper',
       color: 'bg-purple-600 hover:bg-purple-500 text-white ai-glow-sm',
@@ -97,7 +96,6 @@ export const LeadActionCenter: React.FC<LeadActionCenterProps> = ({
     {
       id: 'import_csv',
       name: 'Import Free Outbound CSV',
-      endpoint: 'POST /leads/import-free-outbound/{campaign_id}',
       icon: Upload,
       badge: 'CSV Import',
       color: 'bg-[#18181c] border border-white/[0.08] hover:border-purple-500/40 text-zinc-200',
@@ -105,14 +103,13 @@ export const LeadActionCenter: React.FC<LeadActionCenterProps> = ({
         handleTaskExecute(
           'import_csv',
           'Import Free Outbound CSV',
-          'POST /leads/import-free-outbound/{campaign_id}',
+          'Importing pre-collected leads...',
           () => importFreeOutbound()
         ),
     },
     {
       id: 'find_emails',
       name: 'Discover & Verify Emails',
-      endpoint: 'POST /leads/find-emails/{campaign_id}',
       icon: MailSearch,
       badge: 'Hunter / Verifier',
       color: 'bg-[#18181c] border border-white/[0.08] hover:border-purple-500/40 text-zinc-200',
@@ -120,30 +117,28 @@ export const LeadActionCenter: React.FC<LeadActionCenterProps> = ({
         handleTaskExecute(
           'find_emails',
           'Discover & Verify Emails',
-          'POST /leads/find-emails/{campaign_id}',
+          'Searching domain MX and mailbox records...',
           findEmails
         ),
     },
     {
       id: 'ai_research',
-      name: 'Run Groq AI Web Research',
-      endpoint: 'POST /leads/research/{campaign_id}',
+      name: 'Run AI Web Research',
       icon: Sparkles,
-      badge: 'Groq Llama 3.3',
+      badge: 'Llama 3.3 Engine',
       color:
         'bg-[#18181c] border border-purple-500/30 hover:border-purple-500/60 text-purple-300 cyan-glow',
       onClick: () =>
         handleTaskExecute(
           'ai_research',
-          'Run Groq AI Web Research',
-          'POST /leads/research/{campaign_id}',
+          'Run AI Web Research',
+          'Executing deep web research on prospects...',
           researchLeads
         ),
     },
     {
       id: 'ai_qualify',
       name: 'Run AI ICP Qualification',
-      endpoint: 'POST /leads/qualify/{campaign_id}',
       icon: UserCheck,
       badge: 'Qualification Agent',
       color: 'bg-[#18181c] border border-white/[0.08] hover:border-purple-500/40 text-zinc-200',
@@ -151,14 +146,13 @@ export const LeadActionCenter: React.FC<LeadActionCenterProps> = ({
         handleTaskExecute(
           'ai_qualify',
           'Run AI ICP Qualification',
-          'POST /leads/qualify/{campaign_id}',
+          'Evaluating qualification against ICP criteria...',
           qualifyLeads
         ),
     },
     {
       id: 'write_emails',
       name: 'Generate AI Email Drafts',
-      endpoint: 'POST /leads/write-emails/{campaign_id}',
       icon: Edit3,
       badge: 'Email Writer Agent',
       color:
@@ -167,7 +161,7 @@ export const LeadActionCenter: React.FC<LeadActionCenterProps> = ({
         handleTaskExecute(
           'write_emails',
           'Generate AI Email Drafts',
-          'POST /leads/write-emails/{campaign_id}',
+          'Synthesizing personalized email drafts...',
           writeEmails
         ),
     },
@@ -223,7 +217,6 @@ export const LeadActionCenter: React.FC<LeadActionCenterProps> = ({
                 )}
                 <div>
                   <div className="text-xs font-semibold">{act.name}</div>
-                  <div className="text-[10px] font-mono opacity-70">{act.endpoint}</div>
                 </div>
               </div>
               <span className="hidden rounded border border-white/10 bg-black/30 px-1.5 py-0.5 font-mono text-[9px] text-zinc-300 xl:inline-block">

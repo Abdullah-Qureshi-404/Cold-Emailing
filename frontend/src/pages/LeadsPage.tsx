@@ -1,11 +1,14 @@
 import React, { useState, useEffect } from 'react'
 import { useQuery } from '@tanstack/react-query'
 import { motion } from 'framer-motion'
-import { Users, Search, ChevronLeft, ChevronRight, Mail, Building2, User } from 'lucide-react'
+import { Users, Search, ChevronLeft, ChevronRight, Mail, Building2, User, Eye } from 'lucide-react'
 import { campaignsApi } from '../services/api/campaigns'
 import { leadsApi } from '../services/api/leads'
 import { StatusBadge } from '../components/common/StatusBadge'
 import { SkeletonRows } from '../components/Skeleton'
+import { useUIStore } from '../store/useUIStore'
+import { LeadDetailDrawer } from '../features/leads/components/LeadDetailDrawer'
+import type { LeadListItem } from '../types/api'
 
 const STAGE_OPTIONS = [
   { value: '', label: 'All Statuses' },
@@ -21,7 +24,9 @@ const STAGE_OPTIONS = [
 ]
 
 export const LeadsPage: React.FC = () => {
-  const [selectedCampaignId, setSelectedCampaignId] = useState<number | null>(null)
+  const globalActiveCampaignId = useUIStore((state) => state.activeCampaignId)
+  const [selectedCampaignId, setSelectedCampaignId] = useState<number | null>(() => globalActiveCampaignId)
+  const [selectedLead, setSelectedLead] = useState<LeadListItem | null>(null)
   const [search, setSearch] = useState('')
   const [debouncedSearch, setDebouncedSearch] = useState('')
   const [stage, setStage] = useState('')
@@ -42,7 +47,7 @@ export const LeadsPage: React.FC = () => {
     queryFn: campaignsApi.getCampaigns,
   })
 
-  // Set default selected campaign once loaded
+  // Set default selected campaign once loaded if none selected
   useEffect(() => {
     if (campaigns && campaigns.length > 0 && selectedCampaignId === null) {
       setSelectedCampaignId(campaigns[0].id)
@@ -197,12 +202,17 @@ export const LeadsPage: React.FC = () => {
                     </th>
                     <th scope="col" className="px-5 py-3.5">Status</th>
                     <th scope="col" className="px-5 py-3.5">Campaign</th>
+                    <th scope="col" className="px-5 py-3.5 text-right">Details</th>
                   </tr>
                 </thead>
                 <tbody className="divide-y divide-white/[0.04]">
                   {leads.map((l) => (
-                    <tr key={l.id} className="hover:bg-white/[0.02] transition">
-                      <td className="px-5 py-4 font-semibold text-zinc-100">
+                    <tr
+                      key={l.id}
+                      onClick={() => setSelectedLead(l)}
+                      className="cursor-pointer hover:bg-white/[0.04] transition group"
+                    >
+                      <td className="px-5 py-4 font-semibold text-zinc-100 group-hover:text-purple-300 transition-colors">
                         {l.contact_name || l.company_name || 'Contact'}
                       </td>
                       <td className="px-5 py-4 font-medium text-zinc-300">
@@ -220,6 +230,11 @@ export const LeadsPage: React.FC = () => {
                       </td>
                       <td className="px-5 py-4 font-medium text-zinc-400">
                         {activeCampaign?.name || `Campaign #${campaignId}`}
+                      </td>
+                      <td className="px-5 py-4 text-right">
+                        <span className="inline-flex items-center gap-1 text-[11px] font-medium text-purple-400 group-hover:text-purple-300">
+                          <Eye className="h-3.5 w-3.5" /> View
+                        </span>
                       </td>
                     </tr>
                   ))}
@@ -256,6 +271,12 @@ export const LeadsPage: React.FC = () => {
           )}
         </div>
       </div>
+
+      {/* Lightweight Lead Details Side Drawer */}
+      <LeadDetailDrawer
+        lead={selectedLead}
+        onClose={() => setSelectedLead(null)}
+      />
     </motion.div>
   )
 }

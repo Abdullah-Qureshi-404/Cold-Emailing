@@ -4,6 +4,7 @@ import { useQuery, useQueries, useMutation, useQueryClient } from '@tanstack/rea
 import { motion, AnimatePresence } from 'framer-motion'
 import { Plus, X, ArrowRight, Sparkles, Users, BadgeCheck, Mail, Target, Rocket, Wand2, Loader2, TrendingUp } from 'lucide-react'
 import { campaignsApi } from '../services/api/campaigns'
+import { QUERY_KEYS } from '../services/api/keys'
 import { SkeletonCards } from '../components/Skeleton'
 import { toast } from '../store/useToastStore'
 import type { Campaign, CampaignCreatePayload, CampaignDashboardMetrics, CampaignPlan } from '../types/api'
@@ -67,9 +68,10 @@ export const CampaignsPage: React.FC = () => {
   // feel like a dashboard instead of a bare list.
   const dashboards = useQueries({
     queries: (campaigns ?? []).map((c) => ({
-      queryKey: ['dashboard', c.id],
+      queryKey: QUERY_KEYS.campaignDashboard(c.id),
       queryFn: () => campaignsApi.getCampaignDashboard(c.id),
       enabled: !!campaigns,
+      staleTime: 60000,
     })),
   })
   const dashboardByCampaign = new Map<number, CampaignDashboardMetrics>()
@@ -164,14 +166,12 @@ export const CampaignsPage: React.FC = () => {
               label="Campaigns" 
               value={campaigns.length} 
               iconColor="text-violet-400 bg-violet-500/10"
-              trend="+12% active"
             />
             <StatCard 
               icon={Users} 
               label="Leads Found" 
               value={totals.leads} 
               iconColor="text-cyan-400 bg-cyan-500/10"
-              trend="+18.5% total"
             />
             <StatCard 
               icon={BadgeCheck} 
@@ -179,7 +179,6 @@ export const CampaignsPage: React.FC = () => {
               value={totals.qualified} 
               accent="text-emerald-400" 
               iconColor="text-emerald-400 bg-emerald-500/10"
-              trend="+24.1% rate"
             />
             <StatCard 
               icon={Mail} 
@@ -187,7 +186,6 @@ export const CampaignsPage: React.FC = () => {
               value={totals.sent} 
               accent="text-fuchsia-300" 
               iconColor="text-fuchsia-400 bg-fuchsia-500/10"
-              trend="+98.4% delivered"
             />
           </div>
         )}

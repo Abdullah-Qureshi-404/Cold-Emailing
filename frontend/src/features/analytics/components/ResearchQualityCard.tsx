@@ -20,10 +20,10 @@ export const ResearchQualityCard: React.FC<ResearchQualityCardProps> = ({ campai
           <Sparkles className="h-4 w-4 text-cyan-400" />
           <div>
             <h3 className="text-xs font-semibold text-zinc-100 uppercase tracking-wider">
-              Groq AI Research Audit
+              AI Research Audit
             </h3>
             <p className="text-[11px] text-zinc-400">
-              GET /leads/{activeCampaignId || '{id}'}/research-status
+              Confidence evaluation and enrichment depth
             </p>
           </div>
         </div>

@@ -34,8 +34,8 @@ export const DraftList: React.FC<DraftListProps> = ({
           <h3 className="text-xs font-semibold text-zinc-100 uppercase tracking-wider">
             Email Drafts Queue ({filteredDrafts.length})
           </h3>
-          <span className="text-[10px] font-mono text-purple-400">
-            GET /leads/&#123;id&#125;/email-drafts
+          <span className="text-[10px] font-medium text-purple-400 bg-purple-500/10 px-2 py-0.5 rounded-full border border-purple-500/20">
+            AI Generated
           </span>
         </div>
 

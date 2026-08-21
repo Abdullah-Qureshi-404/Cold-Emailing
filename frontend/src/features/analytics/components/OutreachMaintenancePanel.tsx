@@ -44,7 +44,6 @@ export const OutreachMaintenancePanel: React.FC<OutreachMaintenancePanelProps> =
     {
       id: 'followups',
       name: 'Send Follow-up Emails',
-      endpoint: `POST /leads/send-followups/${activeCampaignId || '{id}'}`,
       icon: Send,
       desc: 'Dispatch step 1 or step 2 follow-ups to non-replied leads.',
       color: 'bg-purple-600 hover:bg-purple-500 text-white ai-glow-sm',
@@ -52,14 +51,13 @@ export const OutreachMaintenancePanel: React.FC<OutreachMaintenancePanelProps> =
         handleTrigger(
           'followups',
           'Send Follow-up Emails',
-          `POST /leads/send-followups/${activeCampaignId}`,
+          'Dispatching sequence follow-ups...',
           sendFollowups
         ),
     },
     {
       id: 'replies',
       name: 'Scan Gmail Replies',
-      endpoint: `POST /leads/check-replies/${activeCampaignId || '{id}'}`,
       icon: RefreshCw,
       desc: 'Scan active threads in Gmail for prospect responses.',
       color: 'bg-[#18181c] border border-cyan-500/30 text-cyan-300 hover:border-cyan-500/60 cyan-glow',
@@ -67,14 +65,13 @@ export const OutreachMaintenancePanel: React.FC<OutreachMaintenancePanelProps> =
         handleTrigger(
           'replies',
           'Scan Gmail Replies',
-          `POST /leads/check-replies/${activeCampaignId}`,
+          'Scanning inbox threads for replies...',
           checkReplies
         ),
     },
     {
       id: 'mark_cold',
       name: 'Mark Unresponsive Cold',
-      endpoint: `POST /leads/mark-cold/${activeCampaignId || '{id}'}`,
       icon: Flame,
       desc: 'Transition leads with completed sequences and 0 replies to COLD.',
       color: 'bg-[#18181c] border border-rose-500/30 text-rose-300 hover:border-rose-500/60',
@@ -82,7 +79,7 @@ export const OutreachMaintenancePanel: React.FC<OutreachMaintenancePanelProps> =
         handleTrigger(
           'mark_cold',
           'Mark Unresponsive Cold',
-          `POST /leads/mark-cold/${activeCampaignId}`,
+          'Marking unresponsive leads as cold...',
           markCold
         ),
     },
@@ -95,7 +92,7 @@ export const OutreachMaintenancePanel: React.FC<OutreachMaintenancePanelProps> =
           Outreach Maintenance & Sequence Tasks
         </h3>
         <p className="text-[11px] text-zinc-400">
-          Dispatch background Celery workers to maintain sequences and detect replies.
+          Dispatch background workers to maintain sequences and detect replies.
         </p>
       </div>
 
@@ -116,10 +113,7 @@ export const OutreachMaintenancePanel: React.FC<OutreachMaintenancePanelProps> =
                 <p className="text-[11px] text-zinc-400 leading-relaxed">{task.desc}</p>
               </div>
 
-              <div className="space-y-2 pt-2 border-t border-white/[0.06]">
-                <span className="text-[10px] font-mono text-zinc-500 block truncate">
-                  {task.endpoint}
-                </span>
+              <div className="pt-2 border-t border-white/[0.06]">
                 <button
                   onClick={task.onClick}
                   disabled={isLoading}

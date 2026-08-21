@@ -28,7 +28,7 @@ export const LeadWorkspacePanel: React.FC<LeadWorkspacePanelProps> = ({ campaign
       const response = await scrapeLeads({ query, location });
       notify(
         `Google Maps scrape for "${query}" in "${location}"`,
-        `POST /leads/scrape/${campaignId}`,
+        'Scraping Google Maps leads in background...',
         response
       );
     } catch (err: unknown) {
@@ -41,8 +41,8 @@ export const LeadWorkspacePanel: React.FC<LeadWorkspacePanelProps> = ({ campaign
     try {
       const response = await importFreeOutbound();
       notify(
-        'Import Free Outbound CSV',
-        `POST /leads/import-free-outbound/${campaignId}`,
+        'Import Pre-collected Leads',
+        'Importing pre-verified outbound leads...',
         response
       );
     } catch (err: unknown) {

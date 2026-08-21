@@ -84,7 +84,7 @@ export const PipelineConversionFunnel: React.FC<PipelineConversionFunnelProps> =
               Pipeline Conversion Funnel
             </h3>
             <p className="text-xs text-zinc-400">
-              GET /campaigns/{activeCampaignId || '{id}'}/leads-summary & /dashboard
+              End-to-end stage progression from lead discovery to positive reply
             </p>
           </div>
         </div>

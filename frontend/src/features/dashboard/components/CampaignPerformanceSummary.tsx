@@ -20,8 +20,8 @@ export const CampaignPerformanceSummary: React.FC<CampaignPerformanceSummaryProp
           <BarChart2 className="h-4 w-4 text-purple-400" />
           <h3 className="text-sm font-semibold text-zinc-100">Campaign Telemetry</h3>
         </div>
-        <span className="text-[10px] font-mono text-zinc-400">
-          GET /campaigns/{activeCampaignId || '{id}'}/dashboard
+        <span className="text-[11px] font-medium text-purple-400 bg-purple-500/10 px-2 py-0.5 rounded-full border border-purple-500/20">
+          Live Data
         </span>
       </div>
 

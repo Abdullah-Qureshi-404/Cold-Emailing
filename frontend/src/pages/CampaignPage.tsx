@@ -447,8 +447,8 @@ export const CampaignPage: React.FC = () => {
                 variant="secondary"
                 busy={busy('import')}
                 disabled={anyTaskRunning}
-                title="A separate tool (free_outbound_agent, in this same project) periodically scrapes GitHub, Dev.to, and ProductHunt for solo devs/founders and saves them to a CSV file. This button imports whatever that file currently has — it does not scrape live when clicked. Usually your best-fit, most reliable source."
-                onClick={() => runDispatch('import', 'Import pre-collected leads (GitHub/Dev.to/ProductHunt)', () => leadsApi.importFreeOutbound(campaignId))}
+                title="Imports pre-verified developer and founder leads from GitHub, Dev.to, and ProductHunt."
+                onClick={() => runDispatch('import', 'Import pre-collected leads', () => leadsApi.importFreeOutbound(campaignId))}
               />
             </div>
 

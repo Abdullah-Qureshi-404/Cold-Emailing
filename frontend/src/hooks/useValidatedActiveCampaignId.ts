@@ -19,8 +19,16 @@ export function useValidatedActiveCampaignId(override?: number | null): number |
 
   const candidate = override ?? activeCampaignId;
 
-  if (!candidate || candidate <= 0) return null;
-  if (!isSuccess || !campaigns) return null;
+  if (candidate && candidate > 0 && isSuccess && campaigns) {
+    if (campaigns.some((c) => c.id === candidate)) {
+      return candidate;
+    }
+  }
 
-  return campaigns.some((c) => c.id === candidate) ? candidate : null;
+  // Graceful fallback: when no specific campaign is selected, default to the first available campaign
+  if (isSuccess && campaigns && campaigns.length > 0) {
+    return campaigns[0].id;
+  }
+
+  return null;
 }
