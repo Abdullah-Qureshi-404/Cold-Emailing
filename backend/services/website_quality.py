@@ -7,12 +7,15 @@ DEFAULT_HEADERS = {
 }
 
 
-def assess_website_quality(url: str | None) -> tuple[int, list[str]]:
+def assess_website_quality(url: str | None, pre_fetched_meta: dict | None = None) -> tuple[int, list[str]]:
     """
     Cheap heuristic scan of a company's website to flag it as a likely lead
     for "your website needs work" outreach. Returns (score 0-100, issues[]),
     where a LOW score means the site looks outdated/neglected — that's the
     signal we actually want for this ICP (higher score = healthier site).
+
+    Optionally reuses pre_fetched_meta from extract_company_information to save
+    an unnecessary second HTTP round-trip.
     """
     issues: list[str] = []
 
@@ -24,17 +27,28 @@ def assess_website_quality(url: str | None) -> tuple[int, list[str]]:
     if full_url.startswith("http://"):
         issues.append("No HTTPS")
 
-    try:
-        start = time.time()
-        resp = requests.get(full_url, headers=DEFAULT_HEADERS, timeout=10, allow_redirects=True)
-        elapsed = time.time() - start
-    except Exception:
-        return 5, ["Website unreachable"]
+    # Reuse pre-fetched response if available
+    if pre_fetched_meta and isinstance(pre_fetched_meta, dict):
+        if pre_fetched_meta.get("error"):
+            return 5, ["Website unreachable"]
 
-    if resp.status_code != 200:
-        issues.append(f"Site returned HTTP {resp.status_code}")
+        status_code = pre_fetched_meta.get("status_code")
+        if status_code is not None and status_code != 200:
+            issues.append(f"Site returned HTTP {status_code}")
 
-    html = resp.text or ""
+        elapsed = pre_fetched_meta.get("elapsed", 0.0)
+        html = pre_fetched_meta.get("html") or ""
+    else:
+        try:
+            start = time.time()
+            resp = requests.get(full_url, headers=DEFAULT_HEADERS, timeout=10, allow_redirects=True)
+            elapsed = time.time() - start
+            status_code = resp.status_code
+            html = resp.text or ""
+            if resp.status_code != 200:
+                issues.append(f"Site returned HTTP {resp.status_code}")
+        except Exception:
+            return 5, ["Website unreachable"]
 
     if elapsed > 3:
         issues.append("Slow to load (3s+)")

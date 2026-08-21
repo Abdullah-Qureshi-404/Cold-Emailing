@@ -2,6 +2,7 @@ import json
 import logging
 import random
 import time
+import threading
 import requests
 
 from config import (
@@ -10,23 +11,32 @@ from config import (
     GROQ_MODEL,
     GROQ_MAX_RETRIES,
     GROQ_INITIAL_RETRY_DELAY,
-    GROQ_MAX_RETRY_DELAY
+    GROQ_MAX_RETRY_DELAY,
+    GROQ_MAX_CONCURRENT_REQUESTS
 )
 
 logger = logging.getLogger(__name__)
 
 RETRYABLE_STATUS_CODES = {429, 500, 502, 503, 504}
 
+# Thread-safe rate limiter to strictly adhere to Groq's Tokens/Requests Per Minute limits
+_groq_semaphore = threading.Semaphore(GROQ_MAX_CONCURRENT_REQUESTS)
+_rate_limit_lock = threading.Lock()
+_last_request_time = 0.0
+_MIN_REQUEST_INTERVAL = 0.8  # seconds between consecutive requests across all threads
+
 
 def _make_groq_request(messages: list[dict], temperature: float = 0.3, max_tokens: int = 1024) -> str | None:
     """
     Central helper to invoke Groq OpenAI-compatible chat completion API with
-    exponential backoff + jitter and Retry-After header support.
+    semaphore-bounded concurrency, exponential backoff + jitter, and Retry-After support.
 
     Retries strictly for retryable HTTP status codes (429, 500, 502, 503, 504).
     Does NOT retry authentication (401) or bad request (400) errors.
     Returns the string content of the model's message or None on failure.
     """
+    global _last_request_time
+
     if not GROQ_API_KEY:
         logger.error("Groq API error: GROQ_API_KEY is not set in environment")
         return None
@@ -43,78 +53,89 @@ def _make_groq_request(messages: list[dict], temperature: float = 0.3, max_token
         "max_tokens": max_tokens
     }
 
-    for attempt in range(1, GROQ_MAX_RETRIES + 1):
-        try:
-            response = requests.post(
-                GROQ_API_URL,
-                headers=headers,
-                json=payload,
-                timeout=30
-            )
+    with _groq_semaphore:
+        for attempt in range(1, GROQ_MAX_RETRIES + 1):
+            # Enforce inter-request spacing to avoid burst 429s
+            with _rate_limit_lock:
+                now = time.time()
+                elapsed = now - _last_request_time
+                if elapsed < _MIN_REQUEST_INTERVAL:
+                    time.sleep(_MIN_REQUEST_INTERVAL - elapsed)
+                _last_request_time = time.time()
 
-            if response.status_code == 200:
-                data = response.json()
-                content = data["choices"][0]["message"]["content"]
-                return content
-
-            if response.status_code in RETRYABLE_STATUS_CODES:
-                retry_after = response.headers.get("Retry-After")
-                wait_seconds = None
-
-                if retry_after:
-                    try:
-                        wait_seconds = float(retry_after)
-                        logger.info("Groq API returned Retry-After header: %.1fs", wait_seconds)
-                    except ValueError:
-                        wait_seconds = None
-
-                if wait_seconds is None:
-                    # Exponential backoff with jitter
-                    calculated = GROQ_INITIAL_RETRY_DELAY * (2 ** (attempt - 1))
-                    jitter = random.uniform(0.0, 0.5)
-                    wait_seconds = min(GROQ_MAX_RETRY_DELAY, calculated + jitter)
-
-                logger.warning(
-                    "Groq API HTTP %d (attempt %d/%d). Retrying in %.2fs...",
-                    response.status_code,
-                    attempt,
-                    GROQ_MAX_RETRIES,
-                    wait_seconds
+            try:
+                response = requests.post(
+                    GROQ_API_URL,
+                    headers=headers,
+                    json=payload,
+                    timeout=30
                 )
 
-                if attempt < GROQ_MAX_RETRIES:
-                    time.sleep(wait_seconds)
-                    continue
+                if response.status_code == 200:
+                    data = response.json()
+                    content = data["choices"][0]["message"]["content"]
+                    return content
+
+                if response.status_code in RETRYABLE_STATUS_CODES:
+                    retry_after = response.headers.get("Retry-After")
+                    wait_seconds = None
+
+                    if retry_after:
+                        try:
+                            wait_seconds = float(retry_after)
+                            logger.info("Groq API returned Retry-After header: %.1fs", wait_seconds)
+                        except ValueError:
+                            wait_seconds = None
+
+                    if wait_seconds is None:
+                        # Exponential backoff with random jitter to prevent synchronized retries
+                        calculated = GROQ_INITIAL_RETRY_DELAY * (2 ** (attempt - 1))
+                        jitter = random.uniform(0.5, 2.0)
+                        wait_seconds = min(GROQ_MAX_RETRY_DELAY, calculated + jitter)
+
+                    logger.warning(
+                        "Groq API HTTP %d (attempt %d/%d). Backing off for %.2fs...",
+                        response.status_code,
+                        attempt,
+                        GROQ_MAX_RETRIES,
+                        wait_seconds
+                    )
+
+                    if attempt < GROQ_MAX_RETRIES:
+                        time.sleep(wait_seconds)
+                        continue
+                    else:
+                        logger.error(
+                            "Groq API max retries (%d) exhausted. Last HTTP status: %d - %s",
+                            GROQ_MAX_RETRIES,
+                            response.status_code,
+                            response.text[:200]
+                        )
+                        return None
                 else:
                     logger.error(
-                        "Groq API max retries (%d) exhausted. Last HTTP status: %d - %s",
-                        GROQ_MAX_RETRIES,
+                        "Groq API non-retryable HTTP error %d: %s",
                         response.status_code,
                         response.text[:200]
                     )
                     return None
-            else:
-                logger.error(
-                    "Groq API non-retryable HTTP error %d: %s",
-                    response.status_code,
-                    response.text[:200]
-                )
-                return None
 
-        except requests.RequestException as e:
-            logger.warning(
-                "Groq API network error (attempt %d/%d): %s",
-                attempt,
-                GROQ_MAX_RETRIES,
-                e
-            )
-            if attempt < GROQ_MAX_RETRIES:
-                wait_seconds = min(GROQ_MAX_RETRY_DELAY, GROQ_INITIAL_RETRY_DELAY * (2 ** (attempt - 1)))
-                time.sleep(wait_seconds)
-                continue
-            else:
-                logger.error("Groq API request failed after %d network retries: %s", GROQ_MAX_RETRIES, e)
-                return None
+            except requests.RequestException as e:
+                logger.warning(
+                    "Groq API network error (attempt %d/%d): %s",
+                    attempt,
+                    GROQ_MAX_RETRIES,
+                    e
+                )
+                if attempt < GROQ_MAX_RETRIES:
+                    calculated = GROQ_INITIAL_RETRY_DELAY * (2 ** (attempt - 1))
+                    jitter = random.uniform(0.5, 1.5)
+                    wait_seconds = min(GROQ_MAX_RETRY_DELAY, calculated + jitter)
+                    time.sleep(wait_seconds)
+                    continue
+                else:
+                    logger.error("Groq API request failed after %d network retries: %s", GROQ_MAX_RETRIES, e)
+                    return None
 
     return None
 

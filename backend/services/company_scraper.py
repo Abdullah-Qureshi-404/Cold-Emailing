@@ -1,3 +1,4 @@
+import time
 import requests
 from bs4 import BeautifulSoup
 
@@ -7,30 +8,42 @@ DEFAULT_HEADERS = {
 }
 
 # Maximum characters of cleaned text to send to the LLM.
-# Groq context windows are large, but we keep it reasonable
-# to avoid wasting tokens on irrelevant footer/nav text.
 MAX_TEXT_LENGTH = 4000
 
 
-def extract_company_information(url: str) -> str | None:
+def extract_company_information(url: str, return_meta: bool = False):
     """
     Fetches a company website homepage, strips HTML noise,
     and returns clean text suitable for LLM consumption.
 
-    Returns None if the website cannot be reached or has no useful content.
+    If return_meta is True, returns (clean_text, meta_dict).
+    If return_meta is False, returns clean_text.
     """
     if not url:
-        return None
+        return (None, None) if return_meta else None
 
     # Ensure URL has a scheme
-    if not url.startswith(("http://", "https://")):
-        url = f"https://{url}"
+    full_url = url if url.startswith(("http://", "https://")) else f"https://{url}"
+
+    meta = {
+        "url": full_url,
+        "status_code": None,
+        "elapsed": 0.0,
+        "html": "",
+        "error": None
+    }
 
     try:
-        response = requests.get(url, headers=DEFAULT_HEADERS, timeout=10)
+        start = time.time()
+        response = requests.get(full_url, headers=DEFAULT_HEADERS, timeout=10, allow_redirects=True)
+        elapsed = time.time() - start
+
+        meta["status_code"] = response.status_code
+        meta["elapsed"] = elapsed
+        meta["html"] = response.text or ""
+
         if response.status_code != 200:
-            print(f"Company scraper: HTTP {response.status_code} for {url}")
-            return None
+            return (None, meta) if return_meta else None
 
         soup = BeautifulSoup(response.text, "html.parser")
 
@@ -52,10 +65,10 @@ def extract_company_information(url: str) -> str | None:
 
         # If we got almost nothing useful, return None
         if len(clean_text) < 50:
-            return None
+            return (None, meta) if return_meta else None
 
-        return clean_text
+        return (clean_text, meta) if return_meta else clean_text
 
     except Exception as e:
-        print(f"Company scraper error for {url}: {e}")
-        return None
+        meta["error"] = str(e)
+        return (None, meta) if return_meta else None

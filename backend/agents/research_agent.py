@@ -15,13 +15,13 @@ def research_lead(lead: Lead, db: Session) -> bool:
     Runs the full research pipeline for a single lead:
 
     1. Transition status: EMAIL_FOUND -> RESEARCH_PENDING
-    2. Scrape company website for text content
+    2. Scrape company website for text content & capture metadata
     3. Send content to Groq LLM for structured research
     4. Validate research quality
     5. Save/update research results into LeadResearch table idempotently
-    6. Transition status: RESEARCH_PENDING -> RESEARCH_COMPLETE (only if valid)
+    6. Transition status: RESEARCH_PENDING -> RESEARCH_COMPLETE
 
-    Returns True if research completed successfully, False otherwise.
+    Returns True if research completed with valid data, False if insufficient data / failed.
     """
     logger.info("Research agent: starting research for lead %d (%s)", lead.id, lead.company_name)
 
@@ -29,11 +29,13 @@ def research_lead(lead: Lead, db: Session) -> bool:
     lead.status = LeadStatus.RESEARCH_PENDING
     db.commit()
 
-    # Step 2: Extract company website content
+    # Step 2: Extract company website content and capture metadata for reuse
     company_text = None
+    website_meta = None
     website_content_length = 0
+
     if lead.website:
-        company_text = extract_company_information(lead.website)
+        company_text, website_meta = extract_company_information(lead.website, return_meta=True)
         if company_text:
             website_content_length = len(company_text)
 
@@ -53,40 +55,43 @@ def research_lead(lead: Lead, db: Session) -> bool:
         company_text=company_text
     )
 
-    if not research_data:
-        logger.warning("Research agent: AI research failed for lead %d (%s)", lead.id, lead.company_name)
-        return False
+    # "Does this lead actually need our help" evidence — reuse pre-fetched website response
+    website_quality_score, website_issues = assess_website_quality(lead.website, pre_fetched_meta=website_meta)
 
-    # Step 4: Extract research fields
-    company_summary = research_data.get("company_summary", "")
-    business_model = research_data.get("business_model", "")
-    technologies = research_data.get("technologies", [])
-    pain_points_data = {
-        "possible_pain_points": research_data.get("possible_pain_points", []),
-        "personalization_angles": research_data.get("personalization_angles", [])
-    }
-    estimated_team_size = research_data.get("estimated_team_size")
-    icp_fit_score = research_data.get("icp_fit_score")
-    if isinstance(icp_fit_score, str) and icp_fit_score.isdigit():
-        icp_fit_score = int(icp_fit_score)
-    if not isinstance(icp_fit_score, int):
+    # Step 4: Extract research fields or fallback
+    if research_data:
+        company_summary = research_data.get("company_summary", "")
+        business_model = research_data.get("business_model", "")
+        technologies = research_data.get("technologies", [])
+        pain_points_data = {
+            "possible_pain_points": research_data.get("possible_pain_points", []),
+            "personalization_angles": research_data.get("personalization_angles", [])
+        }
+        estimated_team_size = research_data.get("estimated_team_size")
+        icp_fit_score = research_data.get("icp_fit_score")
+        if isinstance(icp_fit_score, str) and icp_fit_score.isdigit():
+            icp_fit_score = int(icp_fit_score)
+        if not isinstance(icp_fit_score, int):
+            icp_fit_score = None
+
+        has_summary = bool(company_summary and company_summary.strip())
+        has_description = bool(business_model and business_model.strip())
+        has_tech_or_pain = (
+            bool(technologies and len(technologies) > 0) or
+            bool(research_data.get("possible_pain_points") and len(research_data.get("possible_pain_points")) > 0)
+        )
+        is_valid = has_summary and has_description and has_tech_or_pain
+    else:
+        logger.warning("Research agent: AI research returned no data for lead %d (%s)", lead.id, lead.company_name)
+        company_summary = f"Profile for {lead.company_name}"
+        business_model = ""
+        technologies = []
+        pain_points_data = {"possible_pain_points": [], "personalization_angles": []}
+        estimated_team_size = None
         icp_fit_score = None
+        is_valid = False
 
-    # "Does this lead actually need our help" evidence — an outdated/broken
-    # website is the strongest possible signal for a web/dev freelancer.
-    website_quality_score, website_issues = assess_website_quality(lead.website)
-
-    # Step 5: Validate research quality
-    has_summary = bool(company_summary and company_summary.strip())
-    has_description = bool(business_model and business_model.strip())
-    has_tech_or_pain = (
-        bool(technologies and len(technologies) > 0) or
-        bool(research_data.get("possible_pain_points") and len(research_data.get("possible_pain_points")) > 0)
-    )
-
-    is_valid = has_summary and has_description and has_tech_or_pain
-
-    # Step 6: Calculate confidence score and determine research_status
+    # Step 5: Calculate confidence score and determine research_status
     if is_valid:
         score = 0
         if website_content_length > 100:
@@ -114,14 +119,10 @@ def research_lead(lead: Lead, db: Session) -> bool:
     if lead.email is not None:
         sources_used.append("email")
 
-    # Step 7: Save or update results in LeadResearch table (Idempotent check)
+    # Step 6: Save or update results in LeadResearch table (Idempotent check)
     existing_research = db.query(LeadResearch).filter(LeadResearch.lead_id == lead.id).first()
 
     if existing_research:
-        # Do not overwrite valid completed research unless requested
-        if existing_research.research_status == "completed" and is_valid:
-            logger.info("Research agent: lead %d already has completed research; updating in place", lead.id)
-
         existing_research.company_summary = company_summary
         existing_research.company_description = business_model
         existing_research.technologies = technologies
@@ -150,13 +151,13 @@ def research_lead(lead: Lead, db: Session) -> bool:
         )
         db.add(new_research)
 
-    # Step 8: Advance to RESEARCH_COMPLETE if validation passed
+    # Step 7: Always transition status to RESEARCH_COMPLETE so qualification can evaluate it
+    lead.status = LeadStatus.RESEARCH_COMPLETE
+    db.commit()
+
     if is_valid:
-        lead.status = LeadStatus.RESEARCH_COMPLETE
-        db.commit()
-        logger.info("Research agent: completed research for lead %d (%s) [confidence=%s]", lead.id, lead.company_name, confidence_score)
+        logger.info("Research agent: completed valid research for lead %d (%s) [confidence=%s]", lead.id, lead.company_name, confidence_score)
         return True
     else:
-        db.commit()
-        logger.warning("Research agent: insufficient data for lead %d (%s) [status=%s]", lead.id, lead.company_name, research_status)
+        logger.info("Research agent: recorded insufficient_data research for lead %d (%s)", lead.id, lead.company_name)
         return False
